@@ -1,0 +1,1858 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+<title>EDGE Hack 2026 — Judging Console</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=JetBrains+Mono:wght@400;500;700&family=DM+Sans:wght@400;500;700&display=swap">
+
+<!-- Supabase JS SDK (UMD bundle, loads as the global `supabase`) -->
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+
+<style>
+/* ==========================================================================
+   EDGE HACK 2026 — Real-Time Judging Console
+   Single-file app. Backed by Supabase (Postgres + Realtime).
+   See SUPABASE_SETUP.md for setup. Schema is in schema.sql.
+   ========================================================================== */
+
+:root {
+  --eh-bg: #07080a;
+  --eh-surface: #0e0f13;
+  --eh-surface-2: #14161c;
+  --eh-border: #1f2129;
+  --eh-border-bright: #2a2d38;
+  --eh-text: #e7e7ea;
+  --eh-text-dim: #8a8d97;
+  --eh-text-mute: #5b5e68;
+  --eh-lime: #c5fb45;
+  --eh-cyan: #5cf2ee;
+  --eh-magenta: #ff3d71;
+}
+*, *::before, *::after { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; }
+body {
+  background: var(--eh-bg); color: var(--eh-text);
+  font-family: 'DM Sans', system-ui, sans-serif;
+  font-size: 15px; line-height: 1.5;
+  -webkit-font-smoothing: antialiased; min-height: 100vh;
+}
+a { color: inherit; text-decoration: none; }
+button { font-family: inherit; cursor: pointer; }
+.eh-display { font-family: 'Bebas Neue', system-ui, sans-serif; letter-spacing: 0.04em; line-height: 0.95; }
+.eh-mono { font-family: 'JetBrains Mono', ui-monospace, monospace; }
+
+.eh-grid-bg {
+  background-image:
+    linear-gradient(rgba(197,251,69,0.04) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(197,251,69,0.04) 1px, transparent 1px);
+  background-size: 48px 48px;
+}
+
+/* Layout */
+.shell { min-height: 100vh; display: flex; flex-direction: column; }
+.container { max-width: 1400px; width: 100%; margin: 0 auto; padding: 0 20px; }
+.container-md { max-width: 1100px; width: 100%; margin: 0 auto; padding: 0 20px; }
+.container-sm { max-width: 760px; width: 100%; margin: 0 auto; padding: 0 20px; }
+
+/* Top bar */
+.topbar { position: sticky; top: 0; z-index: 30; border-bottom: 1px solid var(--eh-border); background: rgba(7,8,10,0.92); backdrop-filter: blur(8px); }
+.topbar-inner { display: flex; align-items: center; justify-content: space-between; padding: 12px 20px; max-width: 1400px; margin: 0 auto; gap: 16px; }
+.topbar-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+
+/* Brand */
+.brand { display: inline-flex; align-items: center; gap: 12px; cursor: pointer; background: none; border: 0; padding: 0; color: inherit; }
+.brand:hover { opacity: 0.85; }
+.brand-mark { position: relative; width: 36px; height: 36px; border: 1px solid var(--eh-lime); display: flex; align-items: center; justify-content: center; background: #000; }
+.brand-mark::after { content: ''; position: absolute; top: -3px; right: -3px; width: 8px; height: 8px; background: var(--eh-magenta); }
+.brand-dot { width: 12px; height: 12px; background: var(--eh-lime); animation: eh-pulse 1.6s ease-in-out infinite; }
+.brand-text { display: flex; flex-direction: column; line-height: 1; text-align: left; }
+.brand-title { font-family: 'Bebas Neue'; font-size: 20px; letter-spacing: 0.04em; }
+.brand-title .accent { color: var(--eh-lime); }
+.brand-sub { font-family: 'JetBrains Mono'; font-size: 10px; color: var(--eh-text-mute); letter-spacing: 0.3em; text-transform: uppercase; margin-top: 4px; }
+
+/* Buttons */
+.btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; padding: 10px 16px; min-height: 38px; font-family: 'JetBrains Mono'; font-size: 11px; font-weight: 500; text-transform: uppercase; letter-spacing: 0.18em; border: 1px solid var(--eh-border-bright); background: var(--eh-surface); color: var(--eh-text); transition: border-color 0.15s, color 0.15s, background 0.15s; white-space: nowrap; }
+.btn:hover:not(:disabled) { border-color: var(--eh-lime); color: var(--eh-lime); }
+.btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.btn-primary { border-color: var(--eh-lime); background: var(--eh-lime); color: #000; }
+.btn-primary:hover:not(:disabled) { background: #d2ff5c; border-color: #d2ff5c; color: #000; }
+.btn-ghost { border-color: transparent; background: transparent; color: var(--eh-text-dim); }
+.btn-ghost:hover:not(:disabled) { color: var(--eh-text); border-color: var(--eh-border-bright); background: transparent; }
+.btn-danger { border-color: #7f1d1d; background: rgba(127,29,29,0.25); color: #fecaca; }
+.btn-danger:hover:not(:disabled) { border-color: #f87171; color: #fee2e2; }
+.btn-warning { border-color: #b45309; background: rgba(180,83,9,0.2); color: #fcd34d; }
+.btn-warning:hover:not(:disabled) { border-color: #fbbf24; color: #fde68a; }
+.btn .icon { width: 14px; height: 14px; flex-shrink: 0; }
+.btn-block { width: 100%; }
+.btn-lg { padding: 14px 22px; min-height: 48px; font-size: 12px; }
+.btn-lg .icon { width: 16px; height: 16px; }
+
+/* Tags */
+.tag { display: inline-flex; align-items: center; padding: 2px 8px; border: 1px solid var(--eh-border-bright); font-family: 'JetBrains Mono'; font-size: 10px; text-transform: uppercase; letter-spacing: 0.18em; color: var(--eh-text-dim); }
+.tag.tag-lime { border-color: var(--eh-lime); color: var(--eh-lime); background: rgba(197,251,69,0.08); }
+.tag.tag-cyan { border-color: #06b6d4; color: #67e8f9; background: rgba(6,182,212,0.12); }
+.tag.tag-amber { border-color: #f59e0b; color: #fcd34d; background: rgba(245,158,11,0.12); }
+.tag.tag-mute { border-color: var(--eh-border); color: var(--eh-text-mute); }
+.tag .icon { width: 10px; height: 10px; margin-right: 4px; }
+
+/* Panels & cards */
+.panel { border: 1px solid var(--eh-border); background: var(--eh-surface); }
+.panel-header { border-bottom: 1px solid var(--eh-border); padding: 12px 20px; display: flex; align-items: center; justify-content: space-between; font-family: 'JetBrains Mono'; font-size: 10px; text-transform: uppercase; letter-spacing: 0.28em; color: var(--eh-text-dim); }
+.panel-body { padding: 20px; }
+
+/* Stats */
+.stat { border: 1px solid var(--eh-border); background: var(--eh-surface); padding: 16px; }
+.stat-label { font-family: 'JetBrains Mono'; font-size: 10px; text-transform: uppercase; letter-spacing: 0.22em; color: var(--eh-text-mute); margin-bottom: 6px; }
+.stat-value { font-family: 'Bebas Neue'; font-size: 32px; line-height: 1; color: var(--eh-lime); }
+.stat-value.cyan { color: #67e8f9; }
+.stat-sub { font-family: 'JetBrains Mono'; font-size: 10px; color: var(--eh-text-dim); margin-top: 8px; }
+
+/* Forms */
+.field { display: flex; flex-direction: column; gap: 6px; }
+.field-label { font-family: 'JetBrains Mono'; font-size: 10px; text-transform: uppercase; letter-spacing: 0.22em; color: var(--eh-text-dim); }
+.field-label .req { color: var(--eh-magenta); margin-left: 4px; }
+.field-hint { font-family: 'JetBrains Mono'; font-size: 10px; color: var(--eh-text-mute); }
+.input, .textarea { width: 100%; background: var(--eh-surface-2); border: 1px solid var(--eh-border); padding: 10px 12px; font-family: 'JetBrains Mono'; font-size: 13px; color: var(--eh-text); outline: none; transition: border-color 0.15s; }
+.input::placeholder, .textarea::placeholder { color: var(--eh-text-mute); }
+.input:focus, .textarea:focus { border-color: var(--eh-lime); }
+.textarea { resize: vertical; min-height: 90px; }
+
+/* Range sliders */
+input[type=range].eh-range { -webkit-appearance: none; appearance: none; width: 100%; height: 6px; background: transparent; outline: none; margin: 4px 0; }
+input[type=range].eh-range:disabled { opacity: 0.5; }
+input[type=range].eh-range::-webkit-slider-runnable-track { height: 6px; border: 1px solid #2a2d38; background: linear-gradient(90deg, var(--eh-lime) 0%, var(--eh-lime) var(--pct,0%), #1f2129 var(--pct,0%)); }
+input[type=range].eh-range::-moz-range-track { height: 6px; background: #1f2129; border: 1px solid #2a2d38; }
+input[type=range].eh-range::-moz-range-progress { height: 6px; background: var(--eh-lime); }
+input[type=range].eh-range::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 18px; height: 18px; background: var(--eh-bg); border: 2px solid var(--eh-lime); margin-top: -7px; box-shadow: 0 0 12px rgba(197,251,69,0.6); cursor: pointer; }
+input[type=range].eh-range::-moz-range-thumb { width: 18px; height: 18px; background: var(--eh-bg); border: 2px solid var(--eh-lime); box-shadow: 0 0 12px rgba(197,251,69,0.6); cursor: pointer; border-radius: 0; }
+
+/* Bonus checkbox tile */
+.bonus-tile { position: relative; display: flex; align-items: center; gap: 12px; border: 1px solid var(--eh-border); background: var(--eh-surface-2); padding: 12px 16px; cursor: pointer; transition: border-color 0.15s, background 0.15s; }
+.bonus-tile.is-checked { border-color: var(--eh-lime); background: rgba(197,251,69,0.08); }
+.bonus-tile.is-disabled { opacity: 0.5; cursor: not-allowed; }
+.bonus-tile input { position: absolute; opacity: 0; pointer-events: none; }
+.bonus-tile .checkmark { position: relative; width: 20px; height: 20px; border: 1px solid var(--eh-border-bright); background: var(--eh-bg); flex-shrink: 0; }
+.bonus-tile.is-checked .checkmark { background: var(--eh-lime); border-color: var(--eh-lime); }
+.bonus-tile.is-checked .checkmark::after { content: ''; position: absolute; left: 6px; top: 2px; width: 4px; height: 10px; border: solid #000; border-width: 0 2px 2px 0; transform: rotate(45deg); }
+.bonus-tile .icon { width: 16px; height: 16px; color: var(--eh-text-mute); }
+.bonus-tile.is-checked .icon { color: var(--eh-lime); }
+.bonus-tile .bonus-label { flex: 1; font-size: 14px; }
+.bonus-tile .bonus-value { font-family: 'JetBrains Mono'; font-size: 14px; color: var(--eh-text-mute); }
+.bonus-tile.is-checked .bonus-value { color: var(--eh-lime); }
+
+/* Toasts */
+#toasts { position: fixed; bottom: 24px; right: 24px; z-index: 100; display: flex; flex-direction: column; gap: 8px; pointer-events: none; }
+.toast { pointer-events: auto; padding: 12px 16px; border-left: 2px solid; backdrop-filter: blur(10px); font-family: 'JetBrains Mono'; font-size: 13px; letter-spacing: 0.02em; animation: toast-in 0.18s ease-out; max-width: 360px; }
+.toast.success { border-color: var(--eh-lime); background: rgba(132,204,22,0.15); color: #ecfccb; }
+.toast.error { border-color: var(--eh-magenta); background: rgba(159,18,57,0.4); color: #fee2e2; }
+.toast.info { border-color: #06b6d4; background: rgba(8,145,178,0.25); color: #cffafe; }
+@keyframes toast-in { from { transform: translateX(8px); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+
+/* Modal */
+.modal-backdrop { position: fixed; inset: 0; z-index: 40; background: rgba(0,0,0,0.8); backdrop-filter: blur(4px); display: flex; align-items: center; justify-content: center; padding: 16px; overflow-y: auto; }
+.modal { background: var(--eh-surface); border: 1px solid var(--eh-border-bright); width: 100%; max-width: 640px; margin: auto; }
+.modal-sm { max-width: 460px; }
+.modal-header { border-bottom: 1px solid var(--eh-border); padding: 16px 20px; display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.modal-title { font-family: 'Bebas Neue'; font-size: 24px; line-height: 1; }
+.modal-eyebrow { font-family: 'JetBrains Mono'; font-size: 10px; text-transform: uppercase; letter-spacing: 0.28em; color: var(--eh-text-dim); margin-bottom: 4px; }
+.modal-body { padding: 20px; }
+.modal-footer { border-top: 1px solid var(--eh-border); padding: 12px 20px; display: flex; align-items: center; justify-content: flex-end; gap: 8px; }
+.form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.form-grid .span-2 { grid-column: span 2; }
+@media (max-width: 600px) { .form-grid { grid-template-columns: 1fr; } .form-grid .span-2 { grid-column: span 1; } }
+
+/* Tables */
+.table-wrap { overflow-x: auto; }
+table.eh-table { width: 100%; border-collapse: collapse; font-family: 'JetBrains Mono'; font-size: 12px; }
+.eh-table thead { background: var(--eh-surface-2); border-bottom: 1px solid var(--eh-border); }
+.eh-table th, .eh-table td { padding: 12px 14px; text-align: left; }
+.eh-table th { font-size: 10px; color: var(--eh-text-mute); text-transform: uppercase; letter-spacing: 0.22em; font-weight: 500; }
+.eh-table tbody tr { border-bottom: 1px solid var(--eh-border); }
+.eh-table tbody tr:hover { background: var(--eh-surface-2); }
+.eh-table .text-right { text-align: right; }
+.eh-table .text-center { text-align: center; }
+.eh-table .border-l { border-left: 1px solid var(--eh-border); }
+.eh-table thead .sticky-col { position: sticky; left: 0; background: var(--eh-surface-2); z-index: 1; }
+.eh-table tbody .sticky-col { position: sticky; left: 0; background: var(--eh-surface); z-index: 1; }
+.eh-table tbody tr:hover .sticky-col { background: var(--eh-surface-2); }
+
+/* Animations */
+@keyframes eh-pulse { 0%, 100% { opacity: 1; box-shadow: 0 0 0 0 rgba(197,251,69,0.6); } 50% { opacity: 0.85; box-shadow: 0 0 0 6px rgba(197,251,69,0); } }
+.eh-pulse-dot { animation: eh-pulse 1.6s ease-in-out infinite; }
+.spinner { width: 32px; height: 32px; border: 2px solid var(--eh-lime); border-top-color: transparent; border-radius: 50%; animation: spin 0.8s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* Hero */
+.hero { position: relative; overflow: hidden; padding: 48px 0 64px; }
+.hero-glow { position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%); width: 720px; height: 720px; border-radius: 50%; background: rgba(197,251,69,0.07); filter: blur(140px); pointer-events: none; }
+.hero-content { position: relative; display: grid; grid-template-columns: 1fr; gap: 36px; }
+@media (min-width: 960px) { .hero-content { grid-template-columns: 7fr 5fr; } }
+.hero-eyebrow { display: flex; align-items: center; gap: 12px; margin-bottom: 20px; }
+.hero-eyebrow .dot { width: 8px; height: 8px; background: var(--eh-lime); }
+.hero-eyebrow .text { font-family: 'JetBrains Mono'; font-size: 11px; text-transform: uppercase; letter-spacing: 0.32em; color: var(--eh-lime); }
+.hero h1 { font-family: 'Bebas Neue'; letter-spacing: 0.04em; font-size: clamp(56px, 9vw, 110px); line-height: 0.88; margin: 0 0 16px; }
+.hero h1 .lime { color: var(--eh-lime); }
+.hero h1 .dim { color: var(--eh-text-dim); }
+.hero p.lead { color: var(--eh-text-dim); max-width: 560px; font-size: 16px; line-height: 1.55; margin: 0 0 24px; }
+.hero-actions { display: flex; flex-wrap: wrap; gap: 10px; }
+
+.judge-list-card { border: 1px solid var(--eh-border); background: rgba(14,15,19,0.85); backdrop-filter: blur(8px); }
+.judge-list-row { width: 100%; padding: 16px 20px; display: flex; align-items: center; justify-content: space-between; gap: 16px; background: none; border: 0; border-top: 1px solid var(--eh-border); text-align: left; color: inherit; transition: background 0.15s; }
+.judge-list-row:first-of-type { border-top: 0; }
+.judge-list-row:hover { background: var(--eh-surface-2); }
+.judge-list-row:hover .judge-name { color: var(--eh-lime); }
+.judge-list-row .judge-name { font-family: 'Bebas Neue'; font-size: 22px; line-height: 1; transition: color 0.15s; }
+.judge-list-row .judge-meta { font-family: 'JetBrains Mono'; font-size: 11px; color: var(--eh-text-mute); margin-top: 4px; }
+.judge-list-row .judge-url { font-family: 'JetBrains Mono'; font-size: 10px; color: var(--eh-text-dim); }
+@media (max-width: 600px) { .judge-list-row .judge-url { display: none; } }
+
+.stat-grid { margin-top: 56px; display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; }
+@media (min-width: 960px) { .stat-grid { grid-template-columns: repeat(4, 1fr); } }
+
+/* Judge page */
+.judge-id-card .judge-id-inner { padding: 20px; display: flex; flex-direction: column; gap: 16px; }
+@media (min-width: 720px) { .judge-id-card .judge-id-inner { flex-direction: row; align-items: center; justify-content: space-between; } }
+.judge-avatar { width: 56px; height: 56px; border: 1px solid var(--eh-lime); background: #000; display: flex; align-items: center; justify-content: center; font-family: 'Bebas Neue'; font-size: 32px; color: var(--eh-lime); }
+.judge-id-name { display: flex; align-items: center; gap: 16px; }
+.judge-progress { display: flex; align-items: center; gap: 16px; }
+.judge-progress-bar { width: 128px; height: 8px; background: var(--eh-surface-2); border: 1px solid var(--eh-border); }
+.judge-progress-bar-fill { height: 100%; background: var(--eh-lime); transition: width 0.3s; }
+
+.team-row { padding: 16px 20px; display: flex; flex-direction: column; gap: 12px; border-top: 1px solid var(--eh-border); transition: background 0.15s; }
+@media (min-width: 720px) { .team-row { flex-direction: row; align-items: center; } }
+.team-row:hover { background: var(--eh-surface-2); }
+.team-row-main { flex: 1; min-width: 0; }
+.team-row-name { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 4px; }
+.team-row-name .team-name { font-family: 'Bebas Neue'; font-size: 22px; line-height: 1; }
+.team-row-project { font-family: 'JetBrains Mono'; font-size: 12px; color: var(--eh-text-dim); }
+.team-row-actions { display: flex; align-items: center; gap: 12px; }
+.team-row-score { display: flex; align-items: center; gap: 8px; }
+.team-row-score .score { font-family: 'Bebas Neue'; font-size: 24px; color: var(--eh-lime); line-height: 1; }
+.team-row-score .out-of { font-family: 'JetBrains Mono'; font-size: 10px; color: var(--eh-text-mute); }
+
+.lock-banner { border-top: 1px solid rgba(180,83,9,0.4); background: rgba(180,83,9,0.18); padding: 10px 20px; display: flex; align-items: center; gap: 10px; font-family: 'JetBrains Mono'; font-size: 12px; color: #fcd34d; }
+
+/* Scoring form */
+.score-grid { display: grid; grid-template-columns: 1fr; gap: 20px; }
+@media (min-width: 1024px) { .score-grid { grid-template-columns: 2fr 1fr; } }
+.criterion + .criterion { padding-top: 24px; border-top: 1px dashed var(--eh-border); }
+.criterion-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 8px; }
+.criterion-label { font-size: 14px; font-weight: 500; color: var(--eh-text); }
+.criterion-hint { font-family: 'JetBrains Mono'; font-size: 10px; color: var(--eh-text-mute); margin-top: 2px; }
+.criterion-value { font-family: 'Bebas Neue'; font-size: 26px; color: var(--eh-lime); line-height: 1; flex-shrink: 0; }
+.criterion-value .max { font-family: 'JetBrains Mono'; font-size: 11px; color: var(--eh-text-mute); margin-left: 2px; }
+.criterion-bounds { display: flex; justify-content: space-between; font-family: 'JetBrains Mono'; font-size: 10px; color: var(--eh-text-mute); margin-top: 4px; }
+
+.bonus-grid { display: grid; grid-template-columns: 1fr; gap: 12px; }
+@media (min-width: 600px) { .bonus-grid { grid-template-columns: 1fr 1fr; } }
+
+/* Calc panel */
+.calc-panel-desktop { display: none; }
+@media (min-width: 1024px) { .calc-panel-desktop { display: block; position: sticky; top: 88px; } }
+.calc-panel-mobile { position: fixed; bottom: 0; left: 0; right: 0; z-index: 20; border-top: 1px solid var(--eh-lime); background: rgba(14,15,19,0.96); backdrop-filter: blur(8px); padding: 12px 16px; display: flex; align-items: center; gap: 12px; }
+@media (min-width: 1024px) { .calc-panel-mobile { display: none; } }
+.calc-panel { border: 1px solid var(--eh-lime); background: var(--eh-surface); position: relative; }
+.calc-panel::before { content: ''; position: absolute; inset: 0; pointer-events: none; background-image: linear-gradient(rgba(197,251,69,0.04) 1px, transparent 1px), linear-gradient(90deg, rgba(197,251,69,0.04) 1px, transparent 1px); background-size: 32px 32px; }
+.calc-panel-inner { padding: 20px; position: relative; }
+.calc-row { display: flex; align-items: baseline; justify-content: space-between; padding-bottom: 10px; border-bottom: 1px solid var(--eh-border); margin-bottom: 10px; }
+.calc-row:last-of-type { border-bottom: 0; margin-bottom: 0; }
+.calc-row .calc-label { font-family: 'JetBrains Mono'; font-size: 12px; color: var(--eh-text-dim); }
+.calc-row .calc-num { font-family: 'Bebas Neue'; font-size: 26px; }
+.calc-row .calc-num .max { font-family: 'JetBrains Mono'; font-size: 11px; color: var(--eh-text-mute); }
+.calc-row .calc-num.bonus { color: #67e8f9; }
+.calc-row.final .calc-label { color: var(--eh-lime); text-transform: uppercase; letter-spacing: 0.18em; }
+.calc-row.final .calc-num { font-size: 56px; color: var(--eh-lime); line-height: 1; }
+.calc-actions { display: flex; flex-direction: column; gap: 8px; margin-top: 16px; }
+
+.calc-mobile-final { flex: 1; }
+.calc-mobile-final .calc-label { font-family: 'JetBrains Mono'; font-size: 10px; text-transform: uppercase; letter-spacing: 0.22em; color: var(--eh-text-dim); }
+.calc-mobile-final .num { display: flex; align-items: baseline; gap: 4px; }
+.calc-mobile-final .num .big { font-family: 'Bebas Neue'; font-size: 32px; color: var(--eh-lime); line-height: 1; }
+.calc-mobile-final .num .small { font-family: 'JetBrains Mono'; font-size: 11px; color: var(--eh-text-mute); }
+.calc-mobile-final .breakdown { font-family: 'JetBrains Mono'; font-size: 10px; color: var(--eh-text-mute); margin-top: 2px; }
+
+/* Admin */
+.admin-header { display: flex; align-items: flex-end; justify-content: space-between; flex-wrap: wrap; gap: 16px; margin-bottom: 24px; }
+.admin-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.judge-grid { display: grid; grid-template-columns: 1fr; gap: 12px; padding: 20px; }
+@media (min-width: 720px) { .judge-grid { grid-template-columns: 1fr 1fr; } }
+@media (min-width: 1024px) { .judge-grid { grid-template-columns: 1fr 1fr 1fr; } }
+.judge-card { border: 1px solid var(--eh-border); background: var(--eh-surface-2); padding: 16px; }
+.judge-card-head { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 8px; gap: 8px; }
+.judge-card-name { font-family: 'Bebas Neue'; font-size: 18px; line-height: 1; }
+.judge-card-meta { font-family: 'JetBrains Mono'; font-size: 10px; color: var(--eh-text-mute); margin-top: 4px; }
+.judge-card-url { border: 1px solid var(--eh-border); background: #000; padding: 6px 8px; margin: 8px 0; font-family: 'JetBrains Mono'; font-size: 10px; color: var(--eh-lime); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.judge-card-actions { display: flex; gap: 6px; }
+
+/* Scoreboard */
+.podium-grid { display: grid; grid-template-columns: 1fr; gap: 16px; margin-bottom: 24px; }
+@media (min-width: 720px) { .podium-grid { grid-template-columns: 1fr 1fr 1fr; } }
+.podium-card { position: relative; border: 1px solid; padding: 20px; }
+.podium-card.gold { border-color: var(--eh-lime); background: rgba(197,251,69,0.08); }
+.podium-card.silver { border-color: rgba(34,211,238,0.6); background: rgba(8,145,178,0.12); }
+.podium-card.bronze { border-color: rgba(245,158,11,0.6); background: rgba(180,83,9,0.15); }
+.podium-card .rank { font-family: 'Bebas Neue'; font-size: 64px; line-height: 1; margin-bottom: 8px; }
+.podium-card.gold .rank { color: var(--eh-lime); }
+.podium-card.silver .rank { color: #67e8f9; }
+.podium-card.bronze .rank { color: #fcd34d; }
+.podium-card .team-name { font-family: 'Bebas Neue'; font-size: 22px; line-height: 1; margin-bottom: 4px; }
+.podium-card .project { font-family: 'JetBrains Mono'; font-size: 11px; color: var(--eh-text-dim); margin-bottom: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.podium-card .final { display: flex; align-items: baseline; gap: 4px; }
+.podium-card .final .num { font-family: 'Bebas Neue'; font-size: 36px; color: var(--eh-text); line-height: 1; }
+.podium-card .final .max { font-family: 'JetBrains Mono'; font-size: 11px; color: var(--eh-text-mute); }
+.podium-card .breakdown { font-family: 'JetBrains Mono'; font-size: 10px; color: var(--eh-text-dim); margin-top: 4px; }
+.podium-card .trophy { position: absolute; top: 12px; right: 12px; }
+
+.outlier-cell { display: inline-block; padding: 1px 8px; border: 1px solid #b91c1c; background: rgba(127,29,29,0.4); color: #fda4af; }
+
+.legend { margin-top: 16px; font-family: 'JetBrains Mono'; font-size: 10px; color: var(--eh-text-mute); display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.legend .icon { width: 11px; height: 11px; }
+.legend .outlier-mark { color: #fda4af; }
+
+/* Empty state */
+.empty { border: 1px dashed var(--eh-border-bright); padding: 56px 24px; text-align: center; }
+.empty .icon { width: 28px; height: 28px; color: var(--eh-text-mute); margin: 0 auto 12px; }
+.empty .title { font-family: 'Bebas Neue'; font-size: 26px; color: var(--eh-text-dim); }
+.empty .sub { font-family: 'JetBrains Mono'; font-size: 11px; color: var(--eh-text-mute); margin-top: 8px; max-width: 460px; margin-left: auto; margin-right: auto; }
+.empty .cta { margin-top: 20px; display: inline-flex; }
+
+/* Setup screen (when Supabase isn't configured) */
+.setup-wrap { min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 24px; position: relative; overflow: hidden; }
+.setup-wrap .glow { position: absolute; inset: 0; background: radial-gradient(circle at 50% 50%, rgba(197,251,69,0.06) 0%, transparent 60%); pointer-events: none; }
+.setup-card { position: relative; max-width: 720px; width: 100%; border: 1px solid var(--eh-border-bright); background: var(--eh-surface); }
+.setup-card .head { padding: 28px 28px 0; }
+.setup-card .head h1 { font-family: 'Bebas Neue'; font-size: 44px; margin: 0 0 4px; line-height: 1; }
+.setup-card .head h1 .lime { color: var(--eh-lime); }
+.setup-card .head .sub { font-family: 'JetBrains Mono'; font-size: 11px; text-transform: uppercase; letter-spacing: 0.28em; color: var(--eh-text-dim); }
+.setup-card .body { padding: 24px 28px; color: var(--eh-text-dim); font-size: 14px; }
+.setup-card .body p { margin: 0 0 14px; }
+.setup-card .body code { font-family: 'JetBrains Mono'; background: #000; border: 1px solid var(--eh-border); padding: 2px 6px; color: var(--eh-lime); font-size: 12px; }
+.setup-card ol { padding-left: 20px; margin: 0 0 16px; }
+.setup-card ol li { margin-bottom: 8px; line-height: 1.55; }
+.setup-card pre { background: #000; border: 1px solid var(--eh-border); padding: 14px 16px; font-family: 'JetBrains Mono'; font-size: 12px; color: var(--eh-text); overflow-x: auto; margin: 8px 0 0; line-height: 1.55; }
+.setup-card .footer { border-top: 1px solid var(--eh-border); padding: 14px 28px; font-family: 'JetBrains Mono'; font-size: 11px; color: var(--eh-text-mute); display: flex; align-items: center; gap: 8px; }
+
+/* Auth */
+.auth-wrap { min-height: calc(100vh - 68px); display: flex; align-items: center; justify-content: center; padding: 48px 20px; position: relative; overflow: hidden; }
+.auth-wrap .glow { position: absolute; inset: 0; background: radial-gradient(circle at 50% 45%, rgba(197,251,69,0.07) 0%, transparent 58%); pointer-events: none; }
+.auth-card { position: relative; max-width: 520px; width: 100%; border: 1px solid var(--eh-border-bright); background: rgba(14,15,19,0.94); backdrop-filter: blur(8px); }
+.auth-card-head { padding: 24px 24px 0; }
+.auth-card-head h1 { font-family: 'Bebas Neue'; font-size: 42px; line-height: 1; letter-spacing: 0.04em; margin: 0 0 8px; }
+.auth-card-body { padding: 20px 24px 24px; }
+.auth-form { display: flex; flex-direction: column; gap: 16px; }
+.auth-note { border: 1px solid var(--eh-border); background: var(--eh-surface-2); padding: 12px 14px; font-family: 'JetBrains Mono'; font-size: 11px; color: var(--eh-text-dim); line-height: 1.55; }
+.auth-note.warn { border-color: rgba(245,158,11,0.45); background: rgba(180,83,9,0.14); color: #fcd34d; }
+.auth-route { color: var(--eh-lime); word-break: break-word; }
+
+/* Status / connection */
+.connection-pill { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border: 1px solid var(--eh-border-bright); font-family: 'JetBrains Mono'; font-size: 10px; text-transform: uppercase; letter-spacing: 0.18em; color: var(--eh-text-dim); }
+.connection-pill .dot { width: 7px; height: 7px; background: var(--eh-text-mute); border-radius: 50%; }
+.connection-pill.live { border-color: var(--eh-lime); color: var(--eh-lime); }
+.connection-pill.live .dot { background: var(--eh-lime); animation: eh-pulse 1.6s ease-in-out infinite; }
+.connection-pill.error { border-color: var(--eh-magenta); color: var(--eh-magenta); }
+.connection-pill.error .dot { background: var(--eh-magenta); }
+
+/* Schema panel */
+.schema-toggle { width: 100%; padding: 12px 20px; border: 0; border-bottom: 1px solid var(--eh-border); background: transparent; color: inherit; display: flex; align-items: center; justify-content: space-between; cursor: pointer; transition: background 0.15s; }
+.schema-toggle:hover { background: var(--eh-surface-2); }
+.schema-toggle-label { display: flex; align-items: center; gap: 8px; font-family: 'JetBrains Mono'; font-size: 10px; text-transform: uppercase; letter-spacing: 0.28em; color: var(--eh-text-dim); }
+.schema-toggle .chev { width: 14px; height: 14px; transition: transform 0.2s; }
+.schema-toggle.open .chev { transform: rotate(180deg); }
+
+/* Scoring header */
+.scoring-header { padding: 20px; }
+.scoring-header-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+.scoring-header-main { flex: 1; min-width: 260px; }
+.scoring-eyebrow { font-family: 'JetBrains Mono'; font-size: 10px; text-transform: uppercase; letter-spacing: 0.28em; color: var(--eh-text-dim); margin-bottom: 4px; }
+.scoring-team-name { font-family: 'Bebas Neue'; font-size: 36px; line-height: 1; margin-bottom: 8px; }
+.scoring-project { color: var(--eh-text-dim); font-size: 14px; margin-bottom: 8px; }
+.scoring-tags { display: flex; flex-wrap: wrap; gap: 6px; }
+.scoring-notes { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--eh-border); font-family: 'JetBrains Mono'; font-size: 12px; color: var(--eh-text-dim); }
+.scoring-notes .label { color: var(--eh-text-mute); }
+
+/* Utility */
+.hidden { display: none !important; }
+.flex { display: flex; }
+.items-center { align-items: center; }
+.gap-2 { gap: 8px; }
+.gap-3 { gap: 12px; }
+.mb-3 { margin-bottom: 12px; }
+.mb-4 { margin-bottom: 16px; }
+.mb-5 { margin-bottom: 20px; }
+.mb-6 { margin-bottom: 24px; }
+.text-mute { color: var(--eh-text-mute); }
+.text-dim { color: var(--eh-text-dim); }
+.text-lime { color: var(--eh-lime); }
+.text-cyan { color: #67e8f9; }
+.text-rose { color: #fda4af; }
+.text-amber { color: #fcd34d; }
+.line-clamp-1 { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+</style>
+</head>
+<body>
+
+<div id="app">
+  <div style="min-height:100vh;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:12px;color:var(--eh-text-dim);">
+    <div class="spinner"></div>
+    <div class="eh-mono" style="font-size:11px;letter-spacing:0.28em;text-transform:uppercase;">Connecting to Supabase…</div>
+  </div>
+</div>
+
+<div id="toasts"></div>
+<div id="modal-root"></div>
+
+<script>
+/* ╔════════════════════════════════════════════════════════════════════════╗
+   ║  CONFIGURATION — paste your Supabase credentials below                 ║
+   ║  See SUPABASE_SETUP.md for the 5-step setup guide.                     ║
+   ╚════════════════════════════════════════════════════════════════════════╝ */
+
+const SUPABASE_URL      = 'https://anzlxkchjatafuafxhrx.supabase.co'; // ← e.g. 'https://abcdefghijk.supabase.co'
+const SUPABASE_ANON_KEY = 'sb_publishable_UKT3HKPbdl4rHOgQ5w0W6A_IGgD_xhn'; // ← the long "anon public" key starting with 'eyJ...'
+
+/* ══════════════════════════════════════════════════════════════════════════
+   Constants — rubric and bonuses
+   ══════════════════════════════════════════════════════════════════════════ */
+
+const AUTH_STORAGE_KEY = 'edgehack2026.auth.v1';
+
+const RUBRIC = [
+  { key: 'technical',     label: 'Technical Architecture & Depth', max: 25, hint: 'System design, code quality, technical complexity' },
+  { key: 'innovation',    label: 'Innovation & Creativity',        max: 20, hint: 'Originality of approach and ideas' },
+  { key: 'functionality', label: 'Functionality & Working Demo',   max: 20, hint: 'Does it actually work end-to-end' },
+  { key: 'business',      label: 'Business Impact & Relevance',    max: 15, hint: 'Real-world value and market fit' },
+  { key: 'presentation',  label: 'Presentation & Communication',   max: 12, hint: 'Clarity of pitch and demo' },
+  { key: 'feasibility',   label: 'Feasibility & Future Roadmap',   max: 8,  hint: 'Path to production / next steps' },
+];
+const BASE_MAX = 100;
+
+const BONUSES = [
+  { key: 'realWorldData', label: 'Real-World Data',         value: 5, iconKey: 'database' },
+  { key: 'security',      label: 'Security & Privacy',      value: 5, iconKey: 'shield' },
+  { key: 'crossTrack',    label: 'Cross-Track Integration', value: 3, iconKey: 'layers' },
+  { key: 'accessibility', label: 'Accessibility & Inclusion', value: 2, iconKey: 'eye' },
+];
+const BONUS_MAX = 15;
+
+/* ══════════════════════════════════════════════════════════════════════════
+   Supabase client + data layer
+   ══════════════════════════════════════════════════════════════════════════ */
+
+const isConfigured = () => !!(SUPABASE_URL && SUPABASE_ANON_KEY) && !SUPABASE_URL.includes('YOUR_');
+
+let sb = null; // Supabase client (initialised on boot)
+
+// DB ↔ JS field mapping (DB uses snake_case, app uses camelCase)
+const teamFromDB = (r) => ({
+  id: r.id, name: r.name,
+  projectTitle: r.project_title,
+  track: r.track || '',
+  tableNumber: r.table_number || '',
+  members: r.members || '',
+  notes: r.notes || '',
+});
+const teamToDB = (t) => ({
+  name: t.name,
+  project_title: t.projectTitle,
+  track: t.track || null,
+  table_number: t.tableNumber || null,
+  members: t.members || null,
+  notes: t.notes || null,
+});
+const scoreFromDB = (r) => ({
+  id: r.id, teamId: r.team_id, judgeSlug: r.judge_slug,
+  scores: r.scores || {}, bonuses: r.bonuses || {},
+  feedback: r.feedback || '',
+  createdAt: r.created_at, updatedAt: r.updated_at,
+});
+const judgeFromDB = (r) => ({
+  slug: r.slug,
+  name: r.name,
+  org: r.org || '',
+  expertise: r.expertise || '',
+});
+
+const getJudges = () => state.data.judges || [];
+const judgeBySlug = (slug) => getJudges().find(j => j.slug === slug);
+
+/* ══════════════════════════════════════════════════════════════════════════
+   Score math — pure functions over score records
+   ══════════════════════════════════════════════════════════════════════════ */
+
+const calcBase  = (s) => RUBRIC.reduce((a,r) => a + (Number(s?.[r.key]) || 0), 0);
+const calcBonus = (b) => BONUSES.reduce((a,x) => a + (b?.[x.key] ? x.value : 0), 0);
+const calcFinal = (s, b) => calcBase(s) + calcBonus(b);
+
+function teamAggregates(team, scores) {
+  const judges = getJudges();
+  const teamScores = scores.filter(s => s.teamId === team.id);
+  const submitted = teamScores.length;
+  if (!submitted) {
+    return { submitted, total: judges.length, missing: judges.map(j => j.name), avgBase: 0, avgBonus: 0, avgFinal: 0, perJudge: {}, perCriterion: {}, outlier: null };
+  }
+  const finals = teamScores.map(s => calcFinal(s.scores, s.bonuses));
+  const avgFinal = finals.reduce((a,b)=>a+b,0) / finals.length;
+  const avgBase  = teamScores.reduce((a,s) => a + calcBase(s.scores), 0) / submitted;
+  const avgBonus = teamScores.reduce((a,s) => a + calcBonus(s.bonuses), 0) / submitted;
+  const perJudge = {};
+  for (const s of teamScores) perJudge[s.judgeSlug] = calcFinal(s.scores, s.bonuses);
+  const perCriterion = {};
+  for (const r of RUBRIC) perCriterion[r.key] = teamScores.reduce((a,s) => a + (Number(s.scores?.[r.key])||0), 0) / submitted;
+  const submittedSlugs = new Set(teamScores.map(s => s.judgeSlug));
+  const missing = judges.filter(j => !submittedSlugs.has(j.slug)).map(j => j.name);
+  let outlier = null;
+  for (const s of teamScores) {
+    const f = calcFinal(s.scores, s.bonuses);
+    if (Math.abs(f - avgFinal) > 20) { outlier = { judgeSlug: s.judgeSlug, judgeName: judgeBySlug(s.judgeSlug)?.name, delta: f - avgFinal }; break; }
+  }
+  return { submitted, total: judges.length, missing, avgBase, avgBonus, avgFinal, perJudge, perCriterion, outlier };
+}
+
+function rankedTeams(teams, scores) {
+  const enriched = teams.map(t => ({ team: t, agg: teamAggregates(t, scores) }));
+  enriched.sort((a, b) => {
+    if (b.agg.avgFinal !== a.agg.avgFinal) return b.agg.avgFinal - a.agg.avgFinal;
+    const af = a.agg.perCriterion?.functionality || 0, bf = b.agg.perCriterion?.functionality || 0;
+    if (bf !== af) return bf - af;
+    const ai = a.agg.perCriterion?.innovation || 0, bi = b.agg.perCriterion?.innovation || 0;
+    if (bi !== ai) return bi - ai;
+    const ab = a.agg.perCriterion?.business || 0, bb = b.agg.perCriterion?.business || 0;
+    return bb - ab;
+  });
+  return enriched;
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   Inline SVG icons
+   ══════════════════════════════════════════════════════════════════════════ */
+
+const ICON_SVG = {
+  trophy:    '<path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6"/><path d="M18 9h1.5a2.5 2.5 0 0 0 0-5H18"/><path d="M4 22h16"/><path d="M10 14.66V17c0 .55-.47.98-.97 1.21C7.85 18.75 7 20.24 7 22"/><path d="M14 14.66V17c0 .55.47.98.97 1.21C16.15 18.75 17 20.24 17 22"/><path d="M18 2H6v7a6 6 0 0 0 12 0V2Z"/>',
+  clipboard: '<rect x="8" y="2" width="8" height="4" rx="1" ry="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/>',
+  arrowLeft: '<path d="m12 19-7-7 7-7"/><path d="M19 12H5"/>',
+  refresh:   '<path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M3 21v-5h5"/>',
+  plus:      '<path d="M5 12h14"/><path d="M12 5v14"/>',
+  edit:      '<path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 1 1 3 3L7 19l-4 1 1-4Z"/>',
+  trash:     '<path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>',
+  save:      '<path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/>',
+  x:         '<path d="M18 6 6 18"/><path d="m6 6 12 12"/>',
+  check:     '<polyline points="20 6 9 17 4 12"/>',
+  chevron:   '<polyline points="9 18 15 12 9 6"/>',
+  chevronDown: '<polyline points="6 9 12 15 18 9"/>',
+  alert:     '<path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><path d="M12 9v4"/><path d="M12 17h.01"/>',
+  star:      '<polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>',
+  lock:      '<rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>',
+  unlock:    '<rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 9.9-1"/>',
+  download:  '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>',
+  rotate:    '<path d="M3 12a9 9 0 1 0 9-9"/><polyline points="3 4 3 9 8 9"/>',
+  copy:      '<rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>',
+  external:  '<path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/>',
+  database:  '<ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14a9 3 0 0 0 18 0V5"/><path d="M3 12a9 3 0 0 0 18 0"/>',
+  shield:    '<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>',
+  layers:    '<polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/>',
+  eye:       '<path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/>',
+  cpu:       '<rect x="4" y="4" width="16" height="16" rx="2" ry="2"/><rect x="9" y="9" width="6" height="6"/><line x1="9" y1="2" x2="9" y2="4"/><line x1="15" y1="2" x2="15" y2="4"/><line x1="9" y1="20" x2="9" y2="22"/><line x1="15" y1="20" x2="15" y2="22"/><line x1="20" y1="9" x2="22" y2="9"/><line x1="20" y1="15" x2="22" y2="15"/><line x1="2" y1="9" x2="4" y2="9"/><line x1="2" y1="15" x2="4" y2="15"/>',
+  activity:  '<polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>',
+  users:     '<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>',
+  user:      '<path d="M20 21a8 8 0 0 0-16 0"/><circle cx="12" cy="7" r="4"/>',
+  logOut:    '<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/>',
+  link:      '<path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.72-1.71"/>',
+};
+function icon(name, attrs = '') {
+  const path = ICON_SVG[name] || '';
+  return `<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" ${attrs}>${path}</svg>`;
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   Utilities
+   ══════════════════════════════════════════════════════════════════════════ */
+
+function escapeHtml(s) {
+  if (s == null) return '';
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+function navigate(hash) { window.location.hash = hash; }
+
+function showToast(msg, kind = 'info') {
+  const el = document.createElement('div');
+  el.className = 'toast ' + kind;
+  el.textContent = msg;
+  document.getElementById('toasts').appendChild(el);
+  setTimeout(() => { el.style.opacity = '0'; el.style.transition = 'opacity 0.2s'; }, 2400);
+  setTimeout(() => el.remove(), 2700);
+}
+
+function parseRoute() {
+  const h = window.location.hash || '#/';
+  if (h.startsWith('#/judge/')) return { name: 'judge', slug: h.slice(8) };
+  if (h === '#/admin') return { name: 'admin' };
+  if (h === '#/scoreboard') return { name: 'scoreboard' };
+  return { name: 'home' };
+}
+
+function normalizeUsername(username) {
+  return String(username || '').trim().toLowerCase();
+}
+
+function readStoredAuth() {
+  try {
+    const raw = localStorage.getItem(AUTH_STORAGE_KEY);
+    if (!raw) return null;
+    const auth = JSON.parse(raw);
+    if (!auth || !auth.username || !auth.role) return null;
+    if (auth.role === 'judge' && !auth.judgeSlug) return null;
+    if (!['admin', 'judge'].includes(auth.role)) return null;
+    return {
+      username: normalizeUsername(auth.username),
+      role: auth.role,
+      judgeSlug: auth.judgeSlug || null,
+      signedInAt: auth.signedInAt || null,
+    };
+  } catch (_) {
+    localStorage.removeItem(AUTH_STORAGE_KEY);
+    return null;
+  }
+}
+
+function persistAuth(auth) {
+  localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(auth));
+}
+
+function clearAuth() {
+  localStorage.removeItem(AUTH_STORAGE_KEY);
+  state.auth = null;
+  state.judgeForm = null;
+}
+
+function authDisplayName(auth = state.auth) {
+  if (!auth) return '';
+  if (auth.role === 'admin') return `Admin · ${auth.username}`;
+  const judge = judgeBySlug(auth.judgeSlug);
+  return judge ? `${judge.name} · ${judge.org}` : auth.username;
+}
+
+function routeRequiresAuth(route) {
+  if (route.name === 'admin') return true;
+  if (route.name === 'judge') return !!judgeBySlug(route.slug);
+  return false;
+}
+
+function routeAccess(route, auth = state.auth) {
+  if (!routeRequiresAuth(route)) return { allowed: true };
+  if (!auth) return { allowed: false, reason: 'login' };
+  if (route.name === 'admin') {
+    return auth.role === 'admin'
+      ? { allowed: true }
+      : { allowed: false, reason: 'forbidden' };
+  }
+  if (route.name === 'judge') {
+    return auth.role === 'judge' && auth.judgeSlug === route.slug
+      ? { allowed: true }
+      : { allowed: false, reason: 'forbidden' };
+  }
+  return { allowed: true };
+}
+
+function defaultRouteForAuth(auth = state.auth) {
+  if (!auth) return '#/';
+  if (auth.role === 'admin') return '#/admin';
+  if (auth.role === 'judge' && auth.judgeSlug) return `#/judge/${auth.judgeSlug}`;
+  return '#/';
+}
+
+function requireAdminAccess() {
+  if (state.auth?.role === 'admin') return true;
+  showToast('Admin credentials are required', 'error');
+  navigate('#/admin');
+  return false;
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   App state
+   ══════════════════════════════════════════════════════════════════════════ */
+
+const state = {
+  ready: false,
+  route: parseRoute(),
+  auth: readStoredAuth(),
+  data: { judges: [], teams: [], scores: [], settings: { locked: false, eventName: 'EDGE Hack 2026' } },
+  judgeForm: null,
+  connection: 'connecting', // 'connecting' | 'live' | 'error'
+};
+
+async function fetchData() {
+  if (!sb) return;
+  const [jRes, tRes, sRes, eRes] = await Promise.all([
+    sb.from('judges').select('*').order('name', { ascending: true }),
+    sb.from('teams').select('*').order('created_at', { ascending: true }),
+    sb.from('scores').select('*'),
+    sb.from('event_settings').select('*').eq('id', 1).maybeSingle(),
+  ]);
+  if (jRes.error) throw jRes.error;
+  if (tRes.error) throw tRes.error;
+  if (sRes.error) throw sRes.error;
+  // event_settings might be missing if SQL didn't run — handle gracefully
+  let settings = { locked: false, eventName: 'EDGE Hack 2026' };
+  if (eRes.data) settings = { locked: !!eRes.data.locked, eventName: eRes.data.event_name || 'EDGE Hack 2026' };
+  state.data = {
+    judges: (jRes.data || []).map(judgeFromDB),
+    teams: (tRes.data || []).map(teamFromDB),
+    scores: (sRes.data || []).map(scoreFromDB),
+    settings,
+  };
+}
+
+async function refresh() {
+  try { await fetchData(); render(); }
+  catch (e) { console.error(e); showToast('Failed to fetch from Supabase', 'error'); }
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   Top-level render dispatcher
+   ══════════════════════════════════════════════════════════════════════════ */
+
+function render() {
+  const root = document.getElementById('app');
+  if (!state.ready) return;
+  const access = routeAccess(state.route, state.auth);
+  if (!access.allowed) {
+    root.innerHTML = renderLoginPage(state.route, access.reason);
+    bindLoginPage(state.route);
+    return;
+  }
+  if (state.route.name === 'judge') {
+    if (state.judgeForm && state.judgeForm.slug === state.route.slug) {
+      root.innerHTML = renderJudgeScoringForm();
+      bindJudgeScoringForm();
+    } else {
+      root.innerHTML = renderJudgePage(state.route.slug);
+      bindJudgePage(state.route.slug);
+    }
+    return;
+  }
+  if (state.route.name === 'admin') { root.innerHTML = renderAdminPage(); bindAdminPage(); return; }
+  if (state.route.name === 'scoreboard') { root.innerHTML = renderScoreboardPage(); bindScoreboardPage(); return; }
+  root.innerHTML = renderHomePage();
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   Shared partials
+   ══════════════════════════════════════════════════════════════════════════ */
+
+function topbarHTML(rightHTML) {
+  const conn = state.connection;
+  const pill = `<span class="connection-pill ${conn}"><span class="dot"></span><span>${conn === 'live' ? 'Live' : conn === 'error' ? 'Offline' : 'Sync'}</span></span>`;
+  const auth = state.auth ? `
+    <span class="tag tag-lime">${icon('user')}${escapeHtml(authDisplayName())}</span>
+    <button class="btn btn-ghost" data-action="logout">${icon('logOut')}<span>Logout</span></button>
+  ` : '';
+  return `
+    <header class="topbar">
+      <div class="topbar-inner">
+        <button class="brand" data-action="goto-home" aria-label="Home">
+          <span class="brand-mark"><span class="brand-dot"></span></span>
+          <span class="brand-text">
+            <span class="brand-title">EDGE HACK <span class="accent">2026</span></span>
+            <span class="brand-sub">Judging · Realtime</span>
+          </span>
+        </button>
+        <div class="topbar-actions">${pill}${auth}${rightHTML}</div>
+      </div>
+    </header>`;
+}
+
+function emptyHTML(title, sub, iconName = 'clipboard', cta = '') {
+  return `
+    <div class="empty">
+      ${icon(iconName, 'width="28" height="28" stroke-width="1.6"')}
+      <div class="title">${escapeHtml(title)}</div>
+      ${sub ? `<div class="sub">${escapeHtml(sub)}</div>` : ''}
+      ${cta ? `<div class="cta">${cta}</div>` : ''}
+    </div>`;
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   Credential login
+   ══════════════════════════════════════════════════════════════════════════ */
+
+function renderLoginPage(route, reason = 'login') {
+  const judge = route.name === 'judge' ? judgeBySlug(route.slug) : null;
+  const isJudgeRoute = !!judge;
+  const title = route.name === 'admin' ? 'Admin Login' : `${judge?.name || 'Judge'} Login`;
+  const routeLabel = route.name === 'admin' ? '#/admin' : `#/judge/${escapeHtml(route.slug || '')}`;
+  const prefill = isJudgeRoute ? route.slug : '';
+  const right = `
+    <button class="btn" data-action="goto-scoreboard">${icon('trophy')}<span>Scoreboard</span></button>
+    <button class="btn btn-ghost" data-action="goto-home">${icon('arrowLeft')}<span>Home</span></button>
+  `;
+  const currentNote = state.auth ? `
+    <div class="auth-note warn mb-4">
+      Signed in as ${escapeHtml(authDisplayName())}. This route requires ${route.name === 'admin' ? 'admin credentials' : `the ${escapeHtml(judge.name)} judge credentials`}.
+      <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:10px;">
+        <button class="btn btn-ghost" data-action="goto-my-portal" type="button">${icon('external')}<span>My Portal</span></button>
+        <button class="btn btn-ghost" data-action="logout" type="button">${icon('logOut')}<span>Sign Out</span></button>
+      </div>
+    </div>
+  ` : '';
+  const message = reason === 'forbidden'
+    ? 'Use the credentials assigned to this exact portal to continue.'
+    : 'Enter your assigned credentials to open this portal.';
+
+  return `
+    <div class="shell">
+      ${topbarHTML(right)}
+      <main class="auth-wrap eh-grid-bg">
+        <div class="glow"></div>
+        <section class="auth-card">
+          <div class="auth-card-head">
+            <div class="modal-eyebrow">// Secure access</div>
+            <h1>${escapeHtml(title)}</h1>
+            <div class="eh-mono" style="font-size:12px; color:var(--eh-text-dim);">
+              Requested route <span class="auth-route">${routeLabel}</span>
+            </div>
+          </div>
+          <div class="auth-card-body">
+            ${currentNote}
+            <div class="auth-note mb-4">${escapeHtml(message)}</div>
+            <form class="auth-form" id="auth-login-form">
+              <div class="field">
+                <label class="field-label" for="auth-username">Login ID<span class="req">*</span></label>
+                <input class="input" id="auth-username" name="username" autocomplete="username" autocapitalize="none" spellcheck="false" value="${escapeHtml(prefill)}" placeholder="${route.name === 'admin' ? 'admin login id' : 'judge login id'}" />
+              </div>
+              <div class="field">
+                <label class="field-label" for="auth-password">Password<span class="req">*</span></label>
+                <input class="input" id="auth-password" name="password" type="password" autocomplete="current-password" placeholder="password" />
+              </div>
+              <button class="btn btn-primary btn-lg btn-block" id="auth-submit" type="submit">${icon('lock')}<span>Unlock Portal</span></button>
+            </form>
+          </div>
+        </section>
+      </main>
+    </div>
+  `;
+}
+
+function bindLoginPage(targetRoute) {
+  const form = document.getElementById('auth-login-form');
+  const usernameEl = document.getElementById('auth-username');
+  const passwordEl = document.getElementById('auth-password');
+  const submit = document.getElementById('auth-submit');
+  if (!form || !usernameEl || !passwordEl || !submit) return;
+
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const username = normalizeUsername(usernameEl.value);
+    const password = passwordEl.value;
+    if (!username || !password) {
+      showToast('Login ID and password are required', 'error');
+      return;
+    }
+
+    submit.disabled = true;
+    submit.innerHTML = `${icon('lock')}<span>Checking...</span>`;
+    try {
+      const { data, error } = await sb.rpc('login', { p_username: username, p_password: password });
+      if (error) throw error;
+      const row = Array.isArray(data) ? data[0] : data;
+      if (!row?.success) {
+        showToast('Invalid login ID or password', 'error');
+        return;
+      }
+
+      const auth = {
+        username,
+        role: row.role,
+        judgeSlug: row.judge_slug || null,
+        signedInAt: new Date().toISOString(),
+      };
+      state.auth = auth;
+      state.judgeForm = null;
+      persistAuth(auth);
+
+      const access = routeAccess(targetRoute, auth);
+      const destination = access.allowed ? window.location.hash : defaultRouteForAuth(auth);
+      showToast(access.allowed ? 'Portal unlocked' : 'Signed in · redirecting to your portal', 'success');
+      if (window.location.hash !== destination) navigate(destination);
+      else render();
+    } catch (err) {
+      console.error(err);
+      showToast('Login failed: ' + (err.message || 'unknown error'), 'error');
+    } finally {
+      submit.disabled = false;
+      submit.innerHTML = `${icon('lock')}<span>Unlock Portal</span>`;
+    }
+  });
+
+  (passwordEl.value ? passwordEl : usernameEl).focus();
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   Home page
+   ══════════════════════════════════════════════════════════════════════════ */
+
+function renderHomePage() {
+  const { judges, teams, scores, settings } = state.data;
+  const expected = teams.length * judges.length;
+  const pct = expected ? Math.round((scores.length / expected) * 100) : 0;
+
+  const right = `
+    <button class="btn" data-action="goto-scoreboard">${icon('trophy')}<span>Scoreboard</span></button>
+    <button class="btn btn-primary" data-action="goto-admin">${icon('clipboard')}<span>Admin Console</span></button>
+  `;
+
+  const judgeRows = judges.length ? judges.map(j => `
+    <button class="judge-list-row" data-action="goto-judge" data-slug="${j.slug}">
+      <div>
+        <div class="judge-name">${escapeHtml(j.name)}</div>
+        <div class="judge-meta">${escapeHtml(j.org)} · ${escapeHtml(j.expertise)}</div>
+      </div>
+      <div class="flex items-center gap-3">
+        <span class="judge-url">#/judge/${j.slug}</span>
+        ${icon('chevron')}
+      </div>
+    </button>
+  `).join('') : `
+    <div style="padding:20px;">${emptyHTML('No judges yet', 'Add judge rows in Supabase to create judge endpoints.', 'users')}</div>
+  `;
+
+  return `
+    <div class="shell">
+      ${topbarHTML(right)}
+      <section class="hero">
+        <div class="container eh-grid-bg" style="position:relative;">
+          <div class="hero-glow"></div>
+          <div class="hero-content">
+            <div>
+              <div class="hero-eyebrow">
+                <span class="dot eh-pulse-dot"></span>
+                <span class="text">Live · ${settings.locked ? 'Scoring Locked' : 'Scoring Open'}</span>
+              </div>
+              <h1>JUDGE THE<br/><span class="lime">EDGE</span>.<br/><span class="dim">SCORE THE FUTURE.</span></h1>
+              <p class="lead">Real-time judging console for EDGE Hack 2026. Scores propagate across all dashboards in seconds. Admins and judges sign in with assigned credentials before their portals open.</p>
+              <div class="hero-actions">
+                <button class="btn btn-primary" data-action="goto-scoreboard">${icon('trophy')}<span>View Live Scoreboard</span></button>
+                <button class="btn" data-action="goto-admin">${icon('clipboard')}<span>Open Admin Console</span></button>
+              </div>
+            </div>
+            <div class="judge-list-card">
+              <div class="panel-header">
+                <span>// Judge access · credentialed endpoints</span>
+                <span class="tag tag-lime">Live</span>
+              </div>
+              ${judgeRows}
+              <div style="border-top:1px solid var(--eh-border); padding:12px 20px; display:flex; align-items:center; gap:8px; font-family:'JetBrains Mono'; font-size:10px; color:var(--eh-text-mute);">
+                ${icon('cpu', 'width="12" height="12"')}
+                Each judge endpoint requires its matching login ID and password.
+              </div>
+            </div>
+          </div>
+          <div class="stat-grid">
+            <div class="stat"><div class="stat-label">Teams Registered</div><div class="stat-value">${teams.length}</div><div class="stat-sub">competing today</div></div>
+            <div class="stat"><div class="stat-label">Scores Submitted</div><div class="stat-value cyan">${scores.length}</div><div class="stat-sub">of ${expected} expected</div></div>
+            <div class="stat"><div class="stat-label">Completion</div><div class="stat-value">${pct}%</div><div class="stat-sub">across all judges</div></div>
+            <div class="stat"><div class="stat-label">Judges Active</div><div class="stat-value cyan">${judges.length}</div><div class="stat-sub">from Supabase</div></div>
+          </div>
+        </div>
+      </section>
+    </div>
+  `;
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   Judge page (team list)
+   ══════════════════════════════════════════════════════════════════════════ */
+
+function renderJudgePage(slug) {
+  const judge = judgeBySlug(slug);
+  if (!judge) return renderUnknownJudge(slug);
+
+  const { teams, scores, settings } = state.data;
+  const myScores = {};
+  scores.filter(s => s.judgeSlug === slug).forEach(s => { myScores[s.teamId] = s; });
+  const submittedCount = teams.filter(t => myScores[t.id]).length;
+  const total = teams.length;
+  const progressPct = total ? Math.round((submittedCount / total) * 100) : 0;
+
+  const right = `<button class="btn" data-action="goto-scoreboard">${icon('trophy')}<span>Scoreboard</span></button>`;
+
+  const teamRowsHTML = teams.length === 0
+    ? emptyHTML('No teams yet', "The admin hasn't added any teams. They'll appear here as soon as they do.", 'users')
+    : `<div class="panel">
+        <div class="panel-header"><span>// Teams</span><span class="tag tag-lime">${total} total</span></div>
+        <div>${teams.map(t => {
+          const my = myScores[t.id];
+          const final = my ? calcFinal(my.scores, my.bonuses) : null;
+          const tagsHTML = `${t.tableNumber ? `<span class="tag tag-mute">Table ${escapeHtml(t.tableNumber)}</span>` : ''}${t.track ? `<span class="tag tag-cyan">${escapeHtml(t.track)}</span>` : ''}`;
+          const statusHTML = my
+            ? `<div class="team-row-score"><span class="tag tag-lime">${icon('check')}Completed</span><span class="score">${final}</span><span class="out-of">/115</span></div>`
+            : `<span class="tag">Not Scored</span>`;
+          const btnClass = my ? 'btn' : 'btn btn-primary';
+          const btnIcon = my ? icon('edit') : icon('star');
+          const btnLabel = my ? 'Edit Score' : 'Score Team';
+          return `
+            <div class="team-row">
+              <div class="team-row-main">
+                <div class="team-row-name"><span class="team-name">${escapeHtml(t.name)}</span>${tagsHTML}</div>
+                <div class="team-row-project line-clamp-1">${escapeHtml(t.projectTitle)}</div>
+              </div>
+              <div class="team-row-actions">
+                ${statusHTML}
+                <button class="${btnClass}" data-action="open-score" data-team="${t.id}">${btnIcon}<span>${btnLabel}</span></button>
+              </div>
+            </div>
+          `;
+        }).join('')}</div>
+      </div>`;
+
+  return `
+    <div class="shell">
+      ${topbarHTML(right)}
+      <main class="container-md" style="padding:32px 20px;">
+        <div class="panel mb-5">
+          <div class="judge-id-card">
+            <div class="judge-id-inner">
+              <div class="judge-id-name">
+                <div class="judge-avatar">${escapeHtml(judge.name.charAt(0))}</div>
+                <div>
+                  <div class="modal-eyebrow" style="margin-bottom:4px;">Judging as</div>
+                  <div class="eh-display" style="font-size:30px;">${escapeHtml(judge.name)}</div>
+                  <div class="eh-mono" style="font-size:12px; color:var(--eh-text-dim); margin-top:4px;">${escapeHtml(judge.org)} · ${escapeHtml(judge.expertise)}</div>
+                </div>
+              </div>
+              <div class="judge-progress">
+                <div style="text-align:right;">
+                  <div class="modal-eyebrow">Progress</div>
+                  <div class="eh-display" style="font-size:30px; color:var(--eh-lime); line-height:1;">${submittedCount}<span style="font-size:22px; color:var(--eh-text-mute);">/${total}</span></div>
+                </div>
+                <div class="judge-progress-bar"><div class="judge-progress-bar-fill" style="width:${progressPct}%"></div></div>
+              </div>
+            </div>
+          </div>
+          ${settings.locked ? `<div class="lock-banner">${icon('lock')}<span>Scoring is locked. Existing scores can be viewed but not changed.</span></div>` : ''}
+        </div>
+        ${teamRowsHTML}
+      </main>
+    </div>
+  `;
+}
+
+function renderUnknownJudge(slug) {
+  const right = `<button class="btn" data-action="goto-home">${icon('arrowLeft')}<span>Home</span></button>`;
+  const judges = getJudges();
+  const list = judges.length ? judges.map(j => `
+    <button class="btn btn-ghost" data-action="goto-judge" data-slug="${j.slug}" style="justify-content:flex-start; width:100%;">
+      <span style="color:var(--eh-lime);">/judge/${j.slug}</span>
+      <span style="color:var(--eh-text-mute);">— ${escapeHtml(j.name)}</span>
+    </button>
+  `).join('') : `<div class="text-mute" style="padding:12px;">No judges found in Supabase.</div>`;
+  return `
+    <div class="shell">
+      ${topbarHTML(right)}
+      <main class="container-sm" style="padding:64px 20px; text-align:center;">
+        <div style="color:var(--eh-magenta); margin-bottom:12px;">${icon('alert', 'width="32" height="32"')}</div>
+        <h1 class="eh-display" style="font-size:36px; margin:0 0 8px;">Unknown Judge</h1>
+        <p class="eh-mono" style="font-size:13px; color:var(--eh-text-dim); margin: 0 0 24px;">No judge endpoint matches "${escapeHtml(slug)}".</p>
+        <div class="panel" style="text-align:left;">
+          <div class="panel-header">Valid endpoints</div>
+          <div style="padding:12px; display:flex; flex-direction:column; gap:4px;">${list}</div>
+        </div>
+      </main>
+    </div>
+  `;
+}
+
+function bindJudgePage(slug) {
+  document.querySelectorAll('[data-action="open-score"]').forEach(btn => {
+    btn.addEventListener('click', () => openScoringForm(slug, btn.getAttribute('data-team')));
+  });
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   Judge scoring form
+   ══════════════════════════════════════════════════════════════════════════ */
+
+function openScoringForm(slug, teamId) {
+  const existing = state.data.scores.find(s => s.teamId === teamId && s.judgeSlug === slug);
+  state.judgeForm = {
+    slug, teamId,
+    scores:  existing ? { ...existing.scores }  : Object.fromEntries(RUBRIC.map(r => [r.key, 0])),
+    bonuses: existing ? { ...existing.bonuses } : Object.fromEntries(BONUSES.map(b => [b.key, false])),
+    feedback: existing ? (existing.feedback || '') : '',
+    existingId: existing ? existing.id : null,
+    existingCreatedAt: existing ? existing.createdAt : null,
+  };
+  render();
+  window.scrollTo({ top: 0, behavior: 'instant' });
+}
+
+function closeScoringForm() {
+  state.judgeForm = null;
+  render();
+}
+
+function renderJudgeScoringForm() {
+  const f = state.judgeForm;
+  const judge = judgeBySlug(f.slug);
+  const team = state.data.teams.find(t => t.id === f.teamId);
+  const locked = state.data.settings.locked;
+  if (!team) { closeScoringForm(); return ''; }
+
+  const right = `<button class="btn" data-action="close-scoring">${icon('arrowLeft')}<span>Back to teams</span></button>`;
+  const base = calcBase(f.scores), bonus = calcBonus(f.bonuses), final = base + bonus;
+
+  const tagsHTML = `
+    ${team.track ? `<span class="tag tag-cyan">${escapeHtml(team.track)}</span>` : ''}
+    ${team.tableNumber ? `<span class="tag tag-mute">Table ${escapeHtml(team.tableNumber)}</span>` : ''}
+    ${team.members ? `<span class="tag tag-mute">${team.members.split(',').length} members</span>` : ''}
+  `;
+
+  const rubricHTML = RUBRIC.map(r => {
+    const v = f.scores[r.key] || 0;
+    const pct = (v / r.max) * 100;
+    return `
+      <div class="criterion" data-key="${r.key}">
+        <div class="criterion-head">
+          <div>
+            <div class="criterion-label">${escapeHtml(r.label)}</div>
+            <div class="criterion-hint">${escapeHtml(r.hint)}</div>
+          </div>
+          <div class="criterion-value"><span class="cv-num" data-num="${r.key}">${v}</span><span class="max">/${r.max}</span></div>
+        </div>
+        <input type="range" class="eh-range" data-criterion="${r.key}" min="0" max="${r.max}" step="1" value="${v}" ${locked ? 'disabled' : ''} style="--pct:${pct}%;" />
+        <div class="criterion-bounds"><span>0</span><span>${r.max}</span></div>
+      </div>
+    `;
+  }).join('');
+
+  const bonusHTML = BONUSES.map(b => {
+    const checked = !!f.bonuses[b.key];
+    return `
+      <label class="bonus-tile ${checked ? 'is-checked' : ''} ${locked ? 'is-disabled' : ''}">
+        <input type="checkbox" data-bonus="${b.key}" ${checked ? 'checked' : ''} ${locked ? 'disabled' : ''} />
+        <span class="checkmark"></span>
+        ${icon(b.iconKey)}
+        <span class="bonus-label">${escapeHtml(b.label)}</span>
+        <span class="bonus-value">+${b.value}</span>
+      </label>
+    `;
+  }).join('');
+
+  const calcDesktop = `
+    <div class="calc-panel-desktop">
+      <div class="calc-panel">
+        <div class="calc-panel-inner">
+          <div class="modal-eyebrow" style="color:var(--eh-lime); margin-bottom:16px;">// Live calculation</div>
+          <div class="calc-row"><span class="calc-label">Base score</span><span class="calc-num" data-calc="base">${base}<span class="max"> / 100</span></span></div>
+          <div class="calc-row"><span class="calc-label">Bonus</span><span class="calc-num bonus">+<span data-calc="bonus">${bonus}</span><span class="max"> / 15</span></span></div>
+          <div class="calc-row final"><span class="calc-label">Final</span><span class="calc-num" data-calc="final">${final}<span class="max"> / 115</span></span></div>
+          <div class="calc-actions">
+            <button class="btn btn-primary btn-block" data-action="save-score" ${locked ? 'disabled' : ''}>${icon('save')}<span>${f.existingId ? 'Update Score' : 'Save Score'}</span></button>
+            <button class="btn btn-ghost btn-block" data-action="close-scoring">${icon('x')}<span>Cancel</span></button>
+          </div>
+        </div>
+      </div>
+    </div>
+  `;
+
+  const calcMobile = `
+    <div class="calc-panel-mobile">
+      <div class="calc-mobile-final">
+        <div class="calc-label">Final</div>
+        <div class="num"><span class="big" data-calc="final-mobile">${final}</span><span class="small">/ 115</span></div>
+        <div class="breakdown"><span data-calc="base-mobile">${base}</span> base · <span data-calc="bonus-mobile">+${bonus}</span></div>
+      </div>
+      <button class="btn btn-primary" data-action="save-score" ${locked ? 'disabled' : ''}>${icon('save')}<span>Save</span></button>
+    </div>
+  `;
+
+  return `
+    <div class="shell">
+      ${topbarHTML(right)}
+      <main class="container-md" style="padding:24px 20px 120px;">
+        <div class="panel mb-5">
+          <div class="scoring-header">
+            <div class="scoring-header-row">
+              <div class="scoring-header-main">
+                <div class="scoring-eyebrow">Scoring as ${escapeHtml(judge.name)} · ${escapeHtml(judge.org)}</div>
+                <div class="scoring-team-name">${escapeHtml(team.name)}</div>
+                <div class="scoring-project">${escapeHtml(team.projectTitle)}</div>
+                <div class="scoring-tags">${tagsHTML}</div>
+              </div>
+              ${f.existingId ? `<span class="tag tag-lime">${icon('check')}Updating existing score</span>` : `<span class="tag tag-amber">New score</span>`}
+            </div>
+            ${team.notes ? `<div class="scoring-notes"><span class="label">// admin notes:</span> ${escapeHtml(team.notes)}</div>` : ''}
+          </div>
+        </div>
+
+        <div class="score-grid">
+          <div style="display:flex; flex-direction:column; gap:20px;">
+            <div class="panel">
+              <div class="panel-header"><span>// Base rubric · 100 pts</span><span class="tag tag-lime" data-calc="base-tag">${base} / ${BASE_MAX}</span></div>
+              <div class="panel-body" style="display:flex; flex-direction:column; gap:0;">${rubricHTML}</div>
+            </div>
+            <div class="panel">
+              <div class="panel-header"><span>// Bonus criteria · up to +15</span><span class="tag tag-cyan" data-calc="bonus-tag">+${bonus}</span></div>
+              <div class="panel-body"><div class="bonus-grid">${bonusHTML}</div></div>
+            </div>
+            <div class="panel">
+              <div class="panel-header"><span>// Feedback (private to admin)</span></div>
+              <div class="panel-body">
+                <textarea class="textarea" rows="4" data-feedback placeholder="Anything the team should know? Strengths, gaps, next steps…" ${locked ? 'disabled' : ''}>${escapeHtml(f.feedback)}</textarea>
+              </div>
+            </div>
+          </div>
+          <div>${calcDesktop}</div>
+        </div>
+      </main>
+      ${calcMobile}
+    </div>
+  `;
+}
+
+function bindJudgeScoringForm() {
+  const f = state.judgeForm;
+  if (!f) return;
+  document.querySelectorAll('input[data-criterion]').forEach(input => {
+    input.addEventListener('input', e => {
+      const key = e.target.getAttribute('data-criterion');
+      const v = Number(e.target.value);
+      f.scores[key] = v;
+      const max = RUBRIC.find(r => r.key === key).max;
+      e.target.style.setProperty('--pct', `${(v/max)*100}%`);
+      const numEl = document.querySelector(`[data-num="${key}"]`);
+      if (numEl) numEl.textContent = v;
+      updateLiveCalc();
+    });
+  });
+  document.querySelectorAll('input[data-bonus]').forEach(input => {
+    input.addEventListener('change', e => {
+      const key = e.target.getAttribute('data-bonus');
+      f.bonuses[key] = e.target.checked;
+      e.target.closest('.bonus-tile').classList.toggle('is-checked', e.target.checked);
+      updateLiveCalc();
+    });
+  });
+  const fbEl = document.querySelector('[data-feedback]');
+  if (fbEl) fbEl.addEventListener('input', e => { f.feedback = e.target.value; });
+  document.querySelectorAll('[data-action="save-score"]').forEach(b => b.addEventListener('click', saveScore));
+  document.querySelectorAll('[data-action="close-scoring"]').forEach(b => b.addEventListener('click', closeScoringForm));
+}
+
+function updateLiveCalc() {
+  const f = state.judgeForm; if (!f) return;
+  const base = calcBase(f.scores), bonus = calcBonus(f.bonuses), final = base + bonus;
+  const set = (sel, val) => { const el = document.querySelector(sel); if (el) el.textContent = val; };
+  const baseTag = document.querySelector('[data-calc="base-tag"]'); if (baseTag) baseTag.textContent = `${base} / ${BASE_MAX}`;
+  const bonusTag = document.querySelector('[data-calc="bonus-tag"]'); if (bonusTag) bonusTag.textContent = `+${bonus}`;
+  const baseRow = document.querySelector('[data-calc="base"]'); if (baseRow) baseRow.innerHTML = `${base}<span class="max"> / 100</span>`;
+  set('[data-calc="bonus"]', bonus);
+  const finalEl = document.querySelector('[data-calc="final"]'); if (finalEl) finalEl.innerHTML = `${final}<span class="max"> / 115</span>`;
+  set('[data-calc="base-mobile"]', base);
+  set('[data-calc="bonus-mobile"]', `+${bonus}`);
+  set('[data-calc="final-mobile"]', final);
+}
+
+async function saveScore() {
+  const f = state.judgeForm;
+  if (!f) return;
+  if (!state.auth || state.auth.role !== 'judge' || state.auth.judgeSlug !== f.slug) {
+    showToast('You must sign in as this judge before saving', 'error');
+    render();
+    return;
+  }
+  if (state.data.settings.locked) { showToast('Scoring is locked', 'error'); return; }
+
+  const payload = {
+    team_id: f.teamId,
+    judge_slug: f.slug,
+    scores: f.scores,
+    bonuses: f.bonuses,
+    feedback: f.feedback || null,
+  };
+
+  try {
+    const { error } = await sb
+      .from('scores')
+      .upsert(payload, { onConflict: 'team_id,judge_slug' });
+    if (error) throw error;
+    showToast('Score saved · syncing to scoreboard', 'success');
+    await fetchData();
+    closeScoringForm();
+  } catch (e) {
+    console.error(e);
+    showToast('Save failed: ' + (e.message || 'unknown error'), 'error');
+  }
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   Admin page
+   ══════════════════════════════════════════════════════════════════════════ */
+
+function renderAdminPage() {
+  const { judges, teams, scores, settings } = state.data;
+  const right = `<button class="btn" data-action="goto-scoreboard">${icon('trophy')}<span>Scoreboard</span></button>`;
+
+  const lockedBanner = settings.locked ? `
+    <div class="panel" style="margin-bottom:20px; border-color:rgba(180,83,9,0.5); background:rgba(180,83,9,0.18); padding:12px 20px; display:flex; align-items:center; gap:12px;">
+      ${icon('lock', 'style="color:#fbbf24"')}
+      <div class="eh-mono" style="font-size:12px; color:#fcd34d;">Scoring is currently <strong>LOCKED</strong>. Judges cannot submit or change scores.</div>
+    </div>
+  ` : '';
+
+  const addTeamCTA = `<button class="btn btn-primary btn-lg" data-action="add-team">${icon('plus')}<span>Add Your First Team</span></button>`;
+
+  const teamsTable = teams.length === 0
+    ? `<div style="padding:20px;">${emptyHTML('No teams yet', 'Click below to register your first team. New teams are saved in Supabase and appear here as soon as they are added.', 'users', addTeamCTA)}</div>`
+    : `<div class="table-wrap"><table class="eh-table">
+      <thead><tr><th>Team</th><th>Project</th><th>Track</th><th>Table</th><th>Members</th><th>Scored</th><th></th></tr></thead>
+      <tbody>${teams.map(t => {
+        const scoredBy = scores.filter(s => s.teamId === t.id).length;
+        return `<tr>
+          <td>
+            <div class="eh-display" style="font-size:18px; line-height:1; color:var(--eh-text);">${escapeHtml(t.name)}</div>
+            <div style="font-size:10px; color:var(--eh-text-mute); margin-top:2px;">${escapeHtml(t.id.slice(0,8))}…</div>
+          </td>
+          <td style="color:var(--eh-text-dim); max-width:280px;"><div class="line-clamp-1">${escapeHtml(t.projectTitle)}</div></td>
+          <td>${t.track ? `<span class="tag tag-cyan">${escapeHtml(t.track)}</span>` : '<span class="text-mute">—</span>'}</td>
+          <td class="text-dim">${escapeHtml(t.tableNumber || '—')}</td>
+          <td style="color:var(--eh-text-dim); max-width:200px;"><div class="line-clamp-1">${escapeHtml(t.members || '—')}</div></td>
+          <td><span class="${scoredBy === judges.length && judges.length > 0 ? 'text-lime' : 'text-dim'}">${scoredBy}/${judges.length}</span></td>
+          <td>
+            <div style="display:flex; align-items:center; gap:6px; justify-content:flex-end;">
+              <button class="btn btn-ghost" data-action="edit-team" data-team="${t.id}">${icon('edit')}<span>Edit</span></button>
+              <button class="btn btn-ghost" data-action="delete-team" data-team="${t.id}" style="color:#fda4af;">${icon('trash')}<span>Delete</span></button>
+            </div>
+          </td>
+        </tr>`;
+      }).join('')}</tbody>
+    </table></div>`;
+
+  const judgeCardsHTML = judges.length ? judges.map(j => {
+    const scoredBy = scores.filter(s => s.judgeSlug === j.slug).length;
+    const url = `${window.location.origin}${window.location.pathname}#/judge/${j.slug}`;
+    const tagClass = (scoredBy === teams.length && teams.length > 0) ? 'tag-lime' : 'tag-mute';
+    return `
+      <div class="judge-card">
+        <div class="judge-card-head">
+          <div>
+            <div class="judge-card-name">${escapeHtml(j.name)}</div>
+            <div class="judge-card-meta">${escapeHtml(j.org)} · ${escapeHtml(j.expertise)}</div>
+          </div>
+          <span class="tag ${tagClass}">${scoredBy}/${teams.length}</span>
+        </div>
+        <div class="judge-card-url">#/judge/${j.slug}</div>
+        <div class="judge-card-meta">Login ID: ${escapeHtml(j.slug)}</div>
+        <div class="judge-card-actions">
+          <button class="btn btn-ghost" data-action="judge-open" data-slug="${j.slug}">${icon('external')}<span>Open</span></button>
+          <button class="btn btn-ghost" data-action="judge-copy" data-url="${escapeHtml(url)}">${icon('copy')}<span>Copy Link</span></button>
+        </div>
+      </div>
+    `;
+  }).join('') : emptyHTML('No judges found', 'Add judge rows in Supabase to create judge endpoints.', 'users');
+
+  return `
+    <div class="shell">
+      ${topbarHTML(right)}
+      <main class="container" style="padding:24px 20px;">
+        <div class="admin-header">
+          <div>
+            <div class="modal-eyebrow">// Admin console</div>
+            <h1 class="eh-display" style="font-size:48px; margin:0;">Mission Control</h1>
+            <div class="eh-mono" style="font-size:12px; color:var(--eh-text-dim); margin-top:4px;">${teams.length} teams · ${scores.length} scores submitted</div>
+          </div>
+          <div class="admin-actions">
+            <button class="btn ${settings.locked ? 'btn-warning' : ''}" data-action="toggle-lock">${icon(settings.locked ? 'unlock' : 'lock')}<span>${settings.locked ? 'Unlock Scoring' : 'Lock Scoring'}</span></button>
+            <button class="btn" data-action="export-csv">${icon('download')}<span>Export CSV</span></button>
+            <button class="btn btn-danger" data-action="clear-data">${icon('trash')}<span>Clear Data</span></button>
+            <button class="btn btn-primary" data-action="add-team">${icon('plus')}<span>Add Team</span></button>
+          </div>
+        </div>
+
+        ${lockedBanner}
+
+        <div class="panel mb-6">
+          <div class="panel-header">
+            <span>// Teams</span>
+            <span style="display:inline-flex; gap:8px; align-items:center;">
+              <span class="tag tag-lime">${teams.length}</span>
+              ${teams.length > 0 ? `<button class="btn btn-ghost" data-action="add-team" style="padding:4px 10px; min-height:28px;">${icon('plus')}<span>Add</span></button>` : ''}
+            </span>
+          </div>
+          ${teamsTable}
+        </div>
+
+        <div class="panel mb-6">
+          <div class="panel-header">// Judge endpoints — share each URL with that judge's credentials</div>
+          <div class="judge-grid">${judgeCardsHTML}</div>
+        </div>
+      </main>
+    </div>
+  `;
+}
+
+function bindAdminPage() {
+  document.querySelectorAll('[data-action="add-team"]').forEach(b => b.addEventListener('click', () => openTeamModal(null)));
+  document.querySelectorAll('[data-action="edit-team"]').forEach(b => b.addEventListener('click', () => {
+    const id = b.getAttribute('data-team');
+    const team = state.data.teams.find(t => t.id === id);
+    if (team) openTeamModal(team);
+  }));
+  document.querySelectorAll('[data-action="delete-team"]').forEach(b => b.addEventListener('click', () => {
+    const id = b.getAttribute('data-team');
+    const team = state.data.teams.find(t => t.id === id);
+    if (team) openConfirmModal({
+      title: `Delete ${team.name}?`,
+      message: 'This will also remove all scores submitted for this team. This cannot be undone.',
+      confirmLabel: 'Delete team',
+      onConfirm: () => deleteTeam(team),
+    });
+  }));
+  document.querySelectorAll('[data-action="toggle-lock"]').forEach(b => b.addEventListener('click', toggleLock));
+  document.querySelectorAll('[data-action="export-csv"]').forEach(b => b.addEventListener('click', exportCSV));
+  document.querySelectorAll('[data-action="clear-data"]').forEach(b => b.addEventListener('click', () => {
+    openConfirmModal({
+      title: 'Clear all teams and scores?',
+      message: 'All teams and scores will be deleted from Supabase. No default teams will be inserted. This cannot be undone.',
+      confirmLabel: 'Clear data',
+      onConfirm: doClearData,
+    });
+  }));
+  document.querySelectorAll('[data-action="judge-open"]').forEach(b => b.addEventListener('click', () => {
+    window.open(`${window.location.origin}${window.location.pathname}#/judge/${b.getAttribute('data-slug')}`, '_blank');
+  }));
+  document.querySelectorAll('[data-action="judge-copy"]').forEach(b => b.addEventListener('click', () => {
+    navigator.clipboard.writeText(b.getAttribute('data-url')).then(() => showToast('Link copied', 'success')).catch(() => showToast('Copy failed', 'error'));
+  }));
+}
+
+async function toggleLock() {
+  if (!requireAdminAccess()) return;
+  const next = !state.data.settings.locked;
+  try {
+    const { error } = await sb.from('event_settings').update({ locked: next }).eq('id', 1);
+    if (error) throw error;
+    showToast(next ? 'Scoring locked' : 'Scoring unlocked', 'success');
+    refresh();
+  } catch (e) { showToast('Lock toggle failed: ' + e.message, 'error'); }
+}
+
+async function deleteTeam(team) {
+  if (!requireAdminAccess()) return;
+  try {
+    // ON DELETE CASCADE on team_id will remove related scores too
+    const { error } = await sb.from('teams').delete().eq('id', team.id);
+    if (error) throw error;
+    showToast(`Deleted ${team.name}`, 'success');
+    refresh();
+  } catch (e) { showToast('Delete failed: ' + e.message, 'error'); }
+}
+
+async function doClearData() {
+  if (!requireAdminAccess()) return;
+  try {
+    // Delete all scores then all teams (cascade also handles, but explicit is clearer)
+    const scoreRes = await sb.from('scores').delete().not('id', 'is', null);
+    if (scoreRes.error) throw scoreRes.error;
+    const teamRes = await sb.from('teams').delete().not('id', 'is', null);
+    if (teamRes.error) throw teamRes.error;
+    showToast('Teams and scores cleared', 'success');
+    refresh();
+  } catch (e) { showToast('Clear failed: ' + e.message, 'error'); }
+}
+
+function exportCSV() {
+  if (!requireAdminAccess()) return;
+  const { judges, teams, scores } = state.data;
+  const ranked = rankedTeams(teams, scores);
+  const header = [
+    'rank','team_id','team_name','project_title','track','table',
+    'submitted_judges','missing_judges',
+    ...judges.map(j => `${j.slug}_final`),
+    'avg_base','avg_bonus','avg_final',
+    ...RUBRIC.map(r => `avg_${r.key}`),
+    'outlier_warning'
+  ];
+  const rows = [header];
+  ranked.forEach((entry, idx) => {
+    const { team, agg } = entry;
+    rows.push([
+      idx + 1, team.id, team.name, team.projectTitle, team.track || '', team.tableNumber || '',
+      `${agg.submitted}/${agg.total}`, agg.missing.join('; '),
+      ...judges.map(j => agg.perJudge[j.slug] != null ? agg.perJudge[j.slug] : ''),
+      agg.avgBase.toFixed(2), agg.avgBonus.toFixed(2), agg.avgFinal.toFixed(2),
+      ...RUBRIC.map(r => (agg.perCriterion[r.key] || 0).toFixed(2)),
+      agg.outlier ? `${agg.outlier.judgeName} ${agg.outlier.delta>0?'+':''}${agg.outlier.delta.toFixed(1)}` : ''
+    ]);
+  });
+  const csv = rows.map(r => r.map(cell => {
+    const s = String(cell ?? '');
+    return (s.includes(',') || s.includes('"') || s.includes('\n')) ? `"${s.replace(/"/g,'""')}"` : s;
+  }).join(',')).join('\n');
+  const blob = new Blob([csv], { type: 'text/csv' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = `edgehack2026_scoreboard_${new Date().toISOString().slice(0,10)}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+  showToast('CSV exported', 'success');
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   Modals
+   ══════════════════════════════════════════════════════════════════════════ */
+
+function clearModal() { document.getElementById('modal-root').innerHTML = ''; }
+function backdropClick(e) { if (e.target.classList.contains('modal-backdrop')) clearModal(); }
+
+function openTeamModal(team) {
+  const editing = !!team;
+  const form = team ? { ...team } : { id: '', name: '', projectTitle: '', track: '', tableNumber: '', members: '', notes: '' };
+  const root = document.getElementById('modal-root');
+  root.innerHTML = `
+    <div class="modal-backdrop">
+      <div class="modal">
+        <div class="modal-header">
+          <div>
+            <div class="modal-eyebrow">// ${editing ? 'Edit team' : 'New team'}</div>
+            <div class="modal-title" id="team-modal-title">${editing ? escapeHtml(team.name || 'Untitled') : 'Register Team'}</div>
+          </div>
+          <button class="btn btn-ghost" data-action="close-modal">${icon('x')}<span>Close</span></button>
+        </div>
+        <div class="modal-body">
+          <div class="form-grid">
+            <div class="field"><label class="field-label">Team name<span class="req">*</span></label><input class="input" data-field="name" placeholder="Team name" value="${escapeHtml(form.name)}" /></div>
+            <div class="field"><label class="field-label">Track</label><input class="input" data-field="track" placeholder="AI Infrastructure" value="${escapeHtml(form.track)}" /></div>
+            <div class="field"><label class="field-label">Project title<span class="req">*</span></label><input class="input" data-field="projectTitle" placeholder="One-line project description" value="${escapeHtml(form.projectTitle)}" /></div>
+            <div class="field"><label class="field-label">Table number</label><input class="input" data-field="tableNumber" placeholder="12" value="${escapeHtml(form.tableNumber)}" /></div>
+            <div class="field span-2"><label class="field-label">Team members</label><input class="input" data-field="members" placeholder="Alex K., Priya S., Devon M." value="${escapeHtml(form.members)}" /><span class="field-hint">Comma-separated names</span></div>
+            <div class="field span-2"><label class="field-label">Admin notes</label><textarea class="textarea" rows="3" data-field="notes" placeholder="Anything judges should know">${escapeHtml(form.notes)}</textarea><span class="field-hint">Visible to judges as context</span></div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-ghost" data-action="close-modal">Cancel</button>
+          <button class="btn btn-primary" id="team-save-btn">${icon('save')}<span>${editing ? 'Save changes' : 'Create team'}</span></button>
+        </div>
+      </div>
+    </div>
+  `;
+  root.querySelector('.modal-backdrop').addEventListener('click', backdropClick);
+  root.querySelectorAll('[data-action="close-modal"]').forEach(b => b.addEventListener('click', clearModal));
+  document.getElementById('team-save-btn').addEventListener('click', async () => {
+    if (!requireAdminAccess()) { clearModal(); return; }
+    const out = { ...form };
+    document.querySelectorAll('[data-field]').forEach(el => { out[el.getAttribute('data-field')] = el.value.trim(); });
+    if (!out.name || !out.projectTitle) { showToast('Team name and project title are required', 'error'); return; }
+    try {
+      if (out.id) {
+        const { error } = await sb.from('teams').update(teamToDB(out)).eq('id', out.id);
+        if (error) throw error;
+      } else {
+        const { error } = await sb.from('teams').insert(teamToDB(out));
+        if (error) throw error;
+      }
+      showToast(out.id ? 'Team updated' : 'Team added', 'success');
+      clearModal();
+      refresh();
+    } catch (e) { showToast('Save failed: ' + e.message, 'error'); }
+  });
+  document.querySelector('[data-field="name"]')?.addEventListener('input', e => {
+    const t = document.getElementById('team-modal-title');
+    if (t && editing) t.textContent = e.target.value || 'Untitled';
+  });
+  document.querySelector('[data-field="name"]')?.focus();
+}
+
+function openConfirmModal({ title, message, confirmLabel, onConfirm }) {
+  const root = document.getElementById('modal-root');
+  root.innerHTML = `
+    <div class="modal-backdrop">
+      <div class="modal modal-sm">
+        <div style="padding:20px; border-bottom:1px solid var(--eh-border); display:flex; gap:12px; align-items:flex-start;">
+          <div style="color:var(--eh-magenta); flex-shrink:0;">${icon('alert', 'width="20" height="20"')}</div>
+          <div>
+            <div class="modal-title" style="margin-bottom:4px;">${escapeHtml(title)}</div>
+            <div style="color:var(--eh-text-dim); font-size:13px;">${escapeHtml(message)}</div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-ghost" data-action="close-modal">Cancel</button>
+          <button class="btn btn-danger" id="confirm-yes">${icon('trash')}<span>${escapeHtml(confirmLabel)}</span></button>
+        </div>
+      </div>
+    </div>
+  `;
+  root.querySelector('.modal-backdrop').addEventListener('click', backdropClick);
+  root.querySelectorAll('[data-action="close-modal"]').forEach(b => b.addEventListener('click', clearModal));
+  document.getElementById('confirm-yes').addEventListener('click', () => { clearModal(); onConfirm(); });
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   Scoreboard
+   ══════════════════════════════════════════════════════════════════════════ */
+
+let scoreboardPulse = 0;
+let lastScoreCount = 0;
+
+function renderScoreboardPage() {
+  const { judges, teams, scores, settings } = state.data;
+  if (scores.length !== lastScoreCount) { scoreboardPulse++; lastScoreCount = scores.length; }
+  const ranked = rankedTeams(teams, scores);
+  const totalSubmitted = scores.length;
+  const expectedTotal = teams.length * judges.length;
+  const progress = expectedTotal ? (totalSubmitted / expectedTotal) * 100 : 0;
+  const podium = ranked.slice(0, 3).filter(r => r.agg.submitted > 0);
+
+  const right = `
+    <button class="btn" data-action="manual-refresh">${icon('refresh')}<span>Refresh</span></button>
+    <button class="btn" data-action="goto-admin">${icon('clipboard')}<span>Admin</span></button>
+  `;
+
+  const podiumHTML = podium.length === 0 ? '' : `
+    <div class="podium-grid">
+      ${podium.map((entry, idx) => {
+        const cls = idx === 0 ? 'gold' : idx === 1 ? 'silver' : 'bronze';
+        return `
+          <div class="podium-card ${cls}">
+            <div class="trophy">${icon('trophy', 'width="14" height="14"')}</div>
+            <div class="rank">0${idx + 1}</div>
+            <div class="team-name">${escapeHtml(entry.team.name)}</div>
+            <div class="project">${escapeHtml(entry.team.projectTitle)}</div>
+            <div class="final"><span class="num">${entry.agg.avgFinal.toFixed(1)}</span><span class="max">/ 115</span></div>
+            <div class="breakdown">${entry.agg.submitted}/${entry.agg.total} judges · base ${entry.agg.avgBase.toFixed(1)} · bonus +${entry.agg.avgBonus.toFixed(1)}</div>
+          </div>
+        `;
+      }).join('')}
+    </div>
+  `;
+
+  const tableHTML = ranked.length === 0
+    ? emptyHTML('No teams yet', 'Add teams in the admin console to see the scoreboard.', 'trophy')
+    : `<div class="panel">
+      <div class="table-wrap">
+        <table class="eh-table">
+          <thead><tr>
+            <th class="sticky-col">Rank</th>
+            <th>Team / Project</th>
+            ${judges.map(j => `<th class="text-center" title="${escapeHtml(j.name)} (${escapeHtml(j.org)})">${escapeHtml(j.name.split(' ')[0])}</th>`).join('')}
+            <th class="text-center">Submitted</th>
+            <th class="text-right">Avg Base</th>
+            <th class="text-right">Avg Bonus</th>
+            <th class="text-right border-l">Final Avg</th>
+            <th>Flags</th>
+          </tr></thead>
+          <tbody>
+            ${ranked.map((entry, idx) => {
+              const { team, agg } = entry;
+              const rankColor = idx === 0 ? 'text-lime' : idx === 1 ? 'text-cyan' : idx === 2 ? 'text-amber' : 'text-dim';
+              const judgeCells = judges.map(j => {
+                const v = agg.perJudge[j.slug];
+                const isOutlier = agg.outlier?.judgeSlug === j.slug;
+                if (v == null) return `<td class="text-center text-mute">—</td>`;
+                if (isOutlier) return `<td class="text-center text-rose"><span class="outlier-cell">${v}</span></td>`;
+                return `<td class="text-center">${v}</td>`;
+              }).join('');
+              const flagsHTML = `
+                ${agg.missing.length ? `<div class="text-mute" style="font-size:10px;">missing: ${escapeHtml(agg.missing.join(', '))}</div>` : ''}
+                ${agg.outlier ? `<div class="text-rose" style="font-size:10px; display:inline-flex; align-items:center; gap:4px;">${icon('alert', 'width="11" height="11"')}${escapeHtml(agg.outlier.judgeName)} ${agg.outlier.delta > 0 ? '+' : ''}${agg.outlier.delta.toFixed(1)} from avg</div>` : ''}
+              `;
+              return `<tr>
+                <td class="sticky-col"><span class="eh-display ${rankColor}" style="font-size:24px;">#${idx + 1}</span></td>
+                <td style="min-width:220px;">
+                  <div class="eh-display" style="font-size:16px; color:var(--eh-text);">${escapeHtml(team.name)}</div>
+                  <div class="line-clamp-1 text-mute" style="font-size:10px; max-width:260px;">${escapeHtml(team.projectTitle)}</div>
+                </td>
+                ${judgeCells}
+                <td class="text-center"><span class="${agg.submitted === agg.total ? 'text-lime' : 'text-dim'}">${agg.submitted}/${agg.total}</span></td>
+                <td class="text-right text-dim">${agg.submitted ? agg.avgBase.toFixed(1) : '—'}</td>
+                <td class="text-right text-cyan">${agg.submitted ? `+${agg.avgBonus.toFixed(1)}` : '—'}</td>
+                <td class="text-right border-l"><span class="eh-display text-lime" style="font-size:20px;">${agg.submitted ? agg.avgFinal.toFixed(1) : '—'}</span></td>
+                <td>${flagsHTML}</td>
+              </tr>`;
+            }).join('')}
+          </tbody>
+        </table>
+      </div>
+    </div>`;
+
+  return `
+    <div class="shell">
+      ${topbarHTML(right)}
+      <main class="container" style="padding:24px 20px;">
+        <div class="admin-header">
+          <div>
+            <div class="hero-eyebrow">
+              <span class="dot eh-pulse-dot"></span>
+              <span class="text">// Live · Auto-syncing via Supabase Realtime</span>
+            </div>
+            <h1 class="eh-display" style="font-size:48px; margin:0;">Scoreboard</h1>
+            <div class="eh-mono" style="font-size:12px; color:var(--eh-text-dim); margin-top:4px;">
+              ${totalSubmitted} of ${expectedTotal} scores submitted (${progress.toFixed(0)}%)
+              ${settings.locked ? '<span class="text-amber" style="margin-left:8px;">· LOCKED</span>' : ''}
+            </div>
+          </div>
+          <div class="admin-actions">
+            <span class="tag tag-lime">Update #${scoreboardPulse}</span>
+            <span class="tag tag-mute">${teams.length} teams</span>
+          </div>
+        </div>
+        ${podiumHTML}
+        ${tableHTML}
+        <div class="legend">
+          ${icon('activity', 'width="11" height="11"')}
+          Ranking by avg final score · ties broken by avg Functionality, then Innovation, then Business Impact ·
+          ${icon('alert', 'width="11" height="11" style="color:#f87171"')}
+          <span class="outlier-mark">outlier</span> = single judge ≥20 pts from team avg.
+        </div>
+      </main>
+    </div>
+  `;
+}
+
+function bindScoreboardPage() {
+  document.querySelectorAll('[data-action="manual-refresh"]').forEach(b => b.addEventListener('click', refresh));
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   Setup screen (shown when SUPABASE_URL/KEY aren't filled in)
+   ══════════════════════════════════════════════════════════════════════════ */
+
+function renderSetupScreen() {
+  document.getElementById('app').innerHTML = `
+    <div class="setup-wrap">
+      <div class="glow"></div>
+      <div class="setup-card">
+        <div class="head">
+          <div class="sub">// Setup required</div>
+          <h1>CONNECT TO <span class="lime">SUPABASE</span></h1>
+        </div>
+        <div class="body">
+          <p>This app stores all scores, teams, and event settings in your Supabase database. It takes about <strong>5 minutes</strong> to set up.</p>
+          <ol>
+            <li>Go to <a href="https://supabase.com" target="_blank" style="color:var(--eh-lime); text-decoration:underline;">supabase.com</a> and create a new project (free tier is fine).</li>
+            <li>Open <strong>SQL Editor → New query</strong>, paste the entire contents of <code>schema.sql</code>, and click <strong>Run</strong>.</li>
+            <li>In <strong>Settings → API</strong>, copy your <strong>Project URL</strong> and <strong>anon public key</strong>.</li>
+            <li>Open this HTML file in a text editor and fill in the two constants near the top:</li>
+          </ol>
+          <pre>const SUPABASE_URL      = 'https://&lt;your-project&gt;.supabase.co';
+const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...';</pre>
+          <p style="margin-top:14px;">Save the file and reload this page. The full guide with troubleshooting is in <code>SUPABASE_SETUP.md</code>.</p>
+        </div>
+        <div class="footer">${icon('link')}<span>SUPABASE_SETUP.md · schema.sql</span></div>
+      </div>
+    </div>
+  `;
+}
+
+function renderErrorScreen(msg) {
+  document.getElementById('app').innerHTML = `
+    <div class="setup-wrap">
+      <div class="setup-card">
+        <div class="head">
+          <div class="sub" style="color:var(--eh-magenta);">// Connection error</div>
+          <h1>SUPABASE <span class="lime">UNREACHABLE</span></h1>
+        </div>
+        <div class="body">
+          <p>The app couldn't load data from your Supabase project. Common causes:</p>
+          <ol>
+            <li><strong>Schema didn't run:</strong> open Supabase → Table Editor and verify <code>judges</code>, <code>teams</code>, <code>scores</code>, and <code>event_settings</code> all exist. If not, re-run <code>schema.sql</code>.</li>
+            <li><strong>Wrong URL or key:</strong> double-check the two constants at the top of this HTML file.</li>
+            <li><strong>RLS blocking access:</strong> the schema includes permissive policies for the anon key. Re-run section 6 of <code>schema.sql</code> if needed.</li>
+          </ol>
+          <p style="margin-top:8px; color:var(--eh-text-mute);">Original error:</p>
+          <pre>${escapeHtml(msg)}</pre>
+        </div>
+        <div class="footer">
+          <button class="btn" onclick="window.location.reload()">${icon('refresh')}<span>Retry</span></button>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   Global delegated nav handlers
+   ══════════════════════════════════════════════════════════════════════════ */
+
+document.addEventListener('click', (e) => {
+  const t = e.target.closest('[data-action]');
+  if (!t) return;
+  const action = t.getAttribute('data-action');
+  if (action === 'goto-home') navigate('#/');
+  else if (action === 'goto-admin') navigate('#/admin');
+  else if (action === 'goto-scoreboard') navigate('#/scoreboard');
+  else if (action === 'goto-judge') navigate('#/judge/' + t.getAttribute('data-slug'));
+  else if (action === 'goto-my-portal') navigate(defaultRouteForAuth());
+  else if (action === 'logout') {
+    clearAuth();
+    showToast('Signed out', 'info');
+    render();
+  }
+});
+
+window.addEventListener('hashchange', () => {
+  state.route = parseRoute();
+  if (state.judgeForm && (state.route.name !== 'judge' || state.route.slug !== state.judgeForm.slug)) {
+    state.judgeForm = null;
+  }
+  render();
+});
+
+/* ══════════════════════════════════════════════════════════════════════════
+   Boot — init Supabase, fetch initial data, subscribe to realtime
+   ══════════════════════════════════════════════════════════════════════════ */
+
+(async function boot() {
+  if (!isConfigured()) { renderSetupScreen(); return; }
+  if (typeof window.supabase === 'undefined' || !window.supabase.createClient) {
+    renderErrorScreen('Supabase JS SDK failed to load. Check your internet connection — the SDK is loaded from a CDN. For offline use, download supabase-js and reference it locally.');
+    return;
+  }
+
+  try {
+    sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+      realtime: { params: { eventsPerSecond: 10 } },
+    });
+  } catch (e) {
+    renderErrorScreen('Failed to initialise Supabase client: ' + e.message);
+    return;
+  }
+
+  try {
+    await fetchData();
+  } catch (e) {
+    renderErrorScreen(e.message || String(e));
+    return;
+  }
+
+  // Subscribe to realtime updates on the three mutable tables
+  sb.channel('edgehack-live')
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'judges' },         () => onRealtime())
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'teams' },          () => onRealtime())
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'scores' },         () => onRealtime())
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'event_settings' }, () => onRealtime())
+    .subscribe((status) => {
+      if (status === 'SUBSCRIBED') { state.connection = 'live'; render(); }
+      else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') { state.connection = 'error'; render(); }
+    });
+
+  state.ready = true;
+  state.connection = 'live';
+  render();
+
+  // Light safety-net: every 30s also fetch fresh in case a realtime event was missed
+  setInterval(() => { if (!state.judgeForm) refresh().catch(() => {}); }, 30000);
+})();
+
+async function onRealtime() {
+  // While a judge is in the middle of scoring, we hold off on overwriting their UI.
+  // The data will be re-fetched when they save or close the form.
+  if (state.judgeForm) return;
+  try { await fetchData(); render(); }
+  catch (e) { console.error('Realtime fetch failed', e); }
+}
+</script>
+</body>
+</html>
