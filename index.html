@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-<title>EDGE Hack 2026 — Judging Console</title>
+<title>Judging Console</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=JetBrains+Mono:wght@400;500;700&family=DM+Sans:wght@400;500;700&display=swap">
@@ -13,7 +13,7 @@
 
 <style>
 /* ==========================================================================
-   EDGE HACK 2026 — Real-Time Judging Console
+   Judging Console
    Single-file app. Backed by Supabase (Postgres + Realtime).
    See SUPABASE_SETUP.md for setup. Schema is in schema.sql.
    ========================================================================== */
@@ -284,8 +284,13 @@ table.eh-table { width: 100%; border-collapse: collapse; font-family: 'JetBrains
 .judge-card-head { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 8px; gap: 8px; }
 .judge-card-name { font-family: 'Bebas Neue'; font-size: 18px; line-height: 1; }
 .judge-card-meta { font-family: 'JetBrains Mono'; font-size: 10px; color: var(--eh-text-mute); margin-top: 4px; }
-.judge-card-url { border: 1px solid var(--eh-border); background: #000; padding: 6px 8px; margin: 8px 0; font-family: 'JetBrains Mono'; font-size: 10px; color: var(--eh-lime); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.judge-card-url { border: 1px solid var(--eh-border); background: #000; padding: 6px 8px; margin: 8px 0; font-family: 'JetBrains Mono'; font-size: 10px; line-height: 1.45; color: var(--eh-lime); overflow-wrap: anywhere; }
 .judge-card-actions { display: flex; gap: 6px; }
+.credential-grid { display: grid; gap: 10px; }
+.credential-row { border: 1px solid var(--eh-border); background: var(--eh-surface-2); padding: 10px 12px; }
+.credential-label { font-family: 'JetBrains Mono'; font-size: 10px; text-transform: uppercase; letter-spacing: 0.22em; color: var(--eh-text-mute); margin-bottom: 4px; }
+.credential-value { font-family: 'JetBrains Mono'; font-size: 13px; color: var(--eh-text); overflow-wrap: anywhere; user-select: all; }
+.credential-value.lime { color: var(--eh-lime); }
 
 /* Scoreboard */
 .podium-grid { display: grid; grid-template-columns: 1fr; gap: 16px; margin-bottom: 24px; }
@@ -444,6 +449,7 @@ const BONUS_MAX = 15;
 const isConfigured = () => !!(SUPABASE_URL && SUPABASE_ANON_KEY) && !SUPABASE_URL.includes('YOUR_');
 
 let sb = null; // Supabase client (initialised on boot)
+let adminSessionPassword = ''; // Kept in memory only, never persisted.
 
 // DB ↔ JS field mapping (DB uses snake_case, app uses camelCase)
 const teamFromDB = (r) => ({
@@ -477,6 +483,38 @@ const judgeFromDB = (r) => ({
 
 const getJudges = () => state.data.judges || [];
 const judgeBySlug = (slug) => getJudges().find(j => j.slug === slug);
+
+function appBaseUrl() {
+  const url = new URL(window.location.href);
+  url.hash = '';
+  return url.href;
+}
+
+function judgePortalUrl(slug) {
+  return `${appBaseUrl()}#/judge/${encodeURIComponent(slug)}`;
+}
+
+function slugify(value) {
+  return String(value || '')
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+}
+
+function nextJudgeSlug(seed) {
+  const base = slugify(seed);
+  if (!base) return '';
+  const used = new Set(getJudges().map(j => j.slug));
+  let candidate = base;
+  let suffix = 2;
+  while (used.has(candidate)) {
+    candidate = `${base}-${suffix}`;
+    suffix += 1;
+  }
+  return candidate;
+}
 
 /* ══════════════════════════════════════════════════════════════════════════
    Score math — pure functions over score records
@@ -623,6 +661,7 @@ function persistAuth(auth) {
 
 function clearAuth() {
   localStorage.removeItem(AUTH_STORAGE_KEY);
+  adminSessionPassword = '';
   state.auth = null;
   state.judgeForm = null;
 }
@@ -744,7 +783,7 @@ function render() {
 
 function topbarHTML(rightHTML) {
   const conn = state.connection;
-  const pill = `<span class="connection-pill ${conn}"><span class="dot"></span><span>${conn === 'live' ? 'Live' : conn === 'error' ? 'Offline' : 'Sync'}</span></span>`;
+  const pill = `<span class="connection-pill ${conn}"><span class="dot"></span><span>${conn === 'live' ? 'Connected' : conn === 'error' ? 'Offline' : 'Syncing'}</span></span>`;
   const auth = state.auth ? `
     <span class="tag tag-lime">${icon('user')}${escapeHtml(authDisplayName())}</span>
     <button class="btn btn-ghost" data-action="logout">${icon('logOut')}<span>Logout</span></button>
@@ -755,8 +794,8 @@ function topbarHTML(rightHTML) {
         <button class="brand" data-action="goto-home" aria-label="Home">
           <span class="brand-mark"><span class="brand-dot"></span></span>
           <span class="brand-text">
-            <span class="brand-title">EDGE HACK <span class="accent">2026</span></span>
-            <span class="brand-sub">Judging · Realtime</span>
+            <span class="brand-title">Judging <span class="accent">Console</span></span>
+            <span class="brand-sub">Event scoring</span>
           </span>
         </button>
         <div class="topbar-actions">${pill}${auth}${rightHTML}</div>
@@ -790,16 +829,16 @@ function renderLoginPage(route, reason = 'login') {
   `;
   const currentNote = state.auth ? `
     <div class="auth-note warn mb-4">
-      Signed in as ${escapeHtml(authDisplayName())}. This route requires ${route.name === 'admin' ? 'admin credentials' : `the ${escapeHtml(judge.name)} judge credentials`}.
+      Signed in as ${escapeHtml(authDisplayName())}. This page requires ${route.name === 'admin' ? 'admin access' : `${escapeHtml(judge.name)} access`}.
       <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:10px;">
-        <button class="btn btn-ghost" data-action="goto-my-portal" type="button">${icon('external')}<span>My Portal</span></button>
+        <button class="btn btn-ghost" data-action="goto-my-portal" type="button">${icon('external')}<span>My Page</span></button>
         <button class="btn btn-ghost" data-action="logout" type="button">${icon('logOut')}<span>Sign Out</span></button>
       </div>
     </div>
   ` : '';
   const message = reason === 'forbidden'
-    ? 'Use the credentials assigned to this exact portal to continue.'
-    : 'Enter your assigned credentials to open this portal.';
+    ? 'Sign in with the account assigned to this page.'
+    : 'Sign in to continue.';
 
   return `
     <div class="shell">
@@ -808,10 +847,10 @@ function renderLoginPage(route, reason = 'login') {
         <div class="glow"></div>
         <section class="auth-card">
           <div class="auth-card-head">
-            <div class="modal-eyebrow">// Secure access</div>
+            <div class="modal-eyebrow">// Sign in</div>
             <h1>${escapeHtml(title)}</h1>
             <div class="eh-mono" style="font-size:12px; color:var(--eh-text-dim);">
-              Requested route <span class="auth-route">${routeLabel}</span>
+              Page <span class="auth-route">${routeLabel}</span>
             </div>
           </div>
           <div class="auth-card-body">
@@ -826,7 +865,7 @@ function renderLoginPage(route, reason = 'login') {
                 <label class="field-label" for="auth-password">Password<span class="req">*</span></label>
                 <input class="input" id="auth-password" name="password" type="password" autocomplete="current-password" placeholder="password" />
               </div>
-              <button class="btn btn-primary btn-lg btn-block" id="auth-submit" type="submit">${icon('lock')}<span>Unlock Portal</span></button>
+              <button class="btn btn-primary btn-lg btn-block" id="auth-submit" type="submit">${icon('lock')}<span>Sign In</span></button>
             </form>
           </div>
         </section>
@@ -870,11 +909,12 @@ function bindLoginPage(targetRoute) {
       };
       state.auth = auth;
       state.judgeForm = null;
+      adminSessionPassword = row.role === 'admin' ? password : '';
       persistAuth(auth);
 
       const access = routeAccess(targetRoute, auth);
       const destination = access.allowed ? window.location.hash : defaultRouteForAuth(auth);
-      showToast(access.allowed ? 'Portal unlocked' : 'Signed in · redirecting to your portal', 'success');
+      showToast(access.allowed ? 'Signed in' : 'Signed in · opening your page', 'success');
       if (window.location.hash !== destination) navigate(destination);
       else render();
     } catch (err) {
@@ -882,7 +922,7 @@ function bindLoginPage(targetRoute) {
       showToast('Login failed: ' + (err.message || 'unknown error'), 'error');
     } finally {
       submit.disabled = false;
-      submit.innerHTML = `${icon('lock')}<span>Unlock Portal</span>`;
+      submit.innerHTML = `${icon('lock')}<span>Sign In</span>`;
     }
   });
 
@@ -915,7 +955,7 @@ function renderHomePage() {
       </div>
     </button>
   `).join('') : `
-    <div style="padding:20px;">${emptyHTML('No judges yet', 'Add judge rows in Supabase to create judge endpoints.', 'users')}</div>
+    <div style="padding:20px;">${emptyHTML('No judges yet', 'Judges added by an admin will appear here.', 'users')}</div>
   `;
 
   return `
@@ -928,32 +968,32 @@ function renderHomePage() {
             <div>
               <div class="hero-eyebrow">
                 <span class="dot eh-pulse-dot"></span>
-                <span class="text">Live · ${settings.locked ? 'Scoring Locked' : 'Scoring Open'}</span>
+                <span class="text">Status · ${settings.locked ? 'Scoring Locked' : 'Scoring Open'}</span>
               </div>
-              <h1>JUDGE THE<br/><span class="lime">EDGE</span>.<br/><span class="dim">SCORE THE FUTURE.</span></h1>
-              <p class="lead">Real-time judging console for EDGE Hack 2026. Scores propagate across all dashboards in seconds. Admins and judges sign in with assigned credentials before their portals open.</p>
+              <h1>Judging<br/><span class="lime">Console</span></h1>
+              <p class="lead">Teams, judges, and scores are managed from the event database.</p>
               <div class="hero-actions">
-                <button class="btn btn-primary" data-action="goto-scoreboard">${icon('trophy')}<span>View Live Scoreboard</span></button>
-                <button class="btn" data-action="goto-admin">${icon('clipboard')}<span>Open Admin Console</span></button>
+                <button class="btn btn-primary" data-action="goto-scoreboard">${icon('trophy')}<span>Scoreboard</span></button>
+                <button class="btn" data-action="goto-admin">${icon('clipboard')}<span>Admin</span></button>
               </div>
             </div>
             <div class="judge-list-card">
               <div class="panel-header">
-                <span>// Judge access · credentialed endpoints</span>
-                <span class="tag tag-lime">Live</span>
+                <span>// Judges</span>
+                <span class="tag tag-lime">Active</span>
               </div>
               ${judgeRows}
               <div style="border-top:1px solid var(--eh-border); padding:12px 20px; display:flex; align-items:center; gap:8px; font-family:'JetBrains Mono'; font-size:10px; color:var(--eh-text-mute);">
                 ${icon('cpu', 'width="12" height="12"')}
-                Each judge endpoint requires its matching login ID and password.
+                Judge pages require the assigned login ID and password.
               </div>
             </div>
           </div>
           <div class="stat-grid">
-            <div class="stat"><div class="stat-label">Teams Registered</div><div class="stat-value">${teams.length}</div><div class="stat-sub">competing today</div></div>
-            <div class="stat"><div class="stat-label">Scores Submitted</div><div class="stat-value cyan">${scores.length}</div><div class="stat-sub">of ${expected} expected</div></div>
+            <div class="stat"><div class="stat-label">Teams</div><div class="stat-value">${teams.length}</div><div class="stat-sub">from database</div></div>
+            <div class="stat"><div class="stat-label">Scores</div><div class="stat-value cyan">${scores.length}</div><div class="stat-sub">of ${expected} expected</div></div>
             <div class="stat"><div class="stat-label">Completion</div><div class="stat-value">${pct}%</div><div class="stat-sub">across all judges</div></div>
-            <div class="stat"><div class="stat-label">Judges Active</div><div class="stat-value cyan">${judges.length}</div><div class="stat-sub">from Supabase</div></div>
+            <div class="stat"><div class="stat-label">Judges</div><div class="stat-value cyan">${judges.length}</div><div class="stat-sub">from database</div></div>
           </div>
         </div>
       </section>
@@ -979,7 +1019,7 @@ function renderJudgePage(slug) {
   const right = `<button class="btn" data-action="goto-scoreboard">${icon('trophy')}<span>Scoreboard</span></button>`;
 
   const teamRowsHTML = teams.length === 0
-    ? emptyHTML('No teams yet', "The admin hasn't added any teams. They'll appear here as soon as they do.", 'users')
+    ? emptyHTML('No teams yet', 'Teams added by an admin will appear here.', 'users')
     : `<div class="panel">
         <div class="panel-header"><span>// Teams</span><span class="tag tag-lime">${total} total</span></div>
         <div>${teams.map(t => {
@@ -1047,16 +1087,16 @@ function renderUnknownJudge(slug) {
       <span style="color:var(--eh-lime);">/judge/${j.slug}</span>
       <span style="color:var(--eh-text-mute);">— ${escapeHtml(j.name)}</span>
     </button>
-  `).join('') : `<div class="text-mute" style="padding:12px;">No judges found in Supabase.</div>`;
+  `).join('') : `<div class="text-mute" style="padding:12px;">No judges found.</div>`;
   return `
     <div class="shell">
       ${topbarHTML(right)}
       <main class="container-sm" style="padding:64px 20px; text-align:center;">
         <div style="color:var(--eh-magenta); margin-bottom:12px;">${icon('alert', 'width="32" height="32"')}</div>
         <h1 class="eh-display" style="font-size:36px; margin:0 0 8px;">Unknown Judge</h1>
-        <p class="eh-mono" style="font-size:13px; color:var(--eh-text-dim); margin: 0 0 24px;">No judge endpoint matches "${escapeHtml(slug)}".</p>
+        <p class="eh-mono" style="font-size:13px; color:var(--eh-text-dim); margin: 0 0 24px;">No judge page matches "${escapeHtml(slug)}".</p>
         <div class="panel" style="text-align:left;">
-          <div class="panel-header">Valid endpoints</div>
+          <div class="panel-header">Available judges</div>
           <div style="padding:12px; display:flex; flex-direction:column; gap:4px;">${list}</div>
         </div>
       </main>
@@ -1144,7 +1184,7 @@ function renderJudgeScoringForm() {
     <div class="calc-panel-desktop">
       <div class="calc-panel">
         <div class="calc-panel-inner">
-          <div class="modal-eyebrow" style="color:var(--eh-lime); margin-bottom:16px;">// Live calculation</div>
+          <div class="modal-eyebrow" style="color:var(--eh-lime); margin-bottom:16px;">// Score summary</div>
           <div class="calc-row"><span class="calc-label">Base score</span><span class="calc-num" data-calc="base">${base}<span class="max"> / 100</span></span></div>
           <div class="calc-row"><span class="calc-label">Bonus</span><span class="calc-num bonus">+<span data-calc="bonus">${bonus}</span><span class="max"> / 15</span></span></div>
           <div class="calc-row final"><span class="calc-label">Final</span><span class="calc-num" data-calc="final">${final}<span class="max"> / 115</span></span></div>
@@ -1200,7 +1240,7 @@ function renderJudgeScoringForm() {
             <div class="panel">
               <div class="panel-header"><span>// Feedback (private to admin)</span></div>
               <div class="panel-body">
-                <textarea class="textarea" rows="4" data-feedback placeholder="Anything the team should know? Strengths, gaps, next steps…" ${locked ? 'disabled' : ''}>${escapeHtml(f.feedback)}</textarea>
+                <textarea class="textarea" rows="4" data-feedback placeholder="Feedback for the team" ${locked ? 'disabled' : ''}>${escapeHtml(f.feedback)}</textarea>
               </div>
             </div>
           </div>
@@ -1298,14 +1338,15 @@ function renderAdminPage() {
   const lockedBanner = settings.locked ? `
     <div class="panel" style="margin-bottom:20px; border-color:rgba(180,83,9,0.5); background:rgba(180,83,9,0.18); padding:12px 20px; display:flex; align-items:center; gap:12px;">
       ${icon('lock', 'style="color:#fbbf24"')}
-      <div class="eh-mono" style="font-size:12px; color:#fcd34d;">Scoring is currently <strong>LOCKED</strong>. Judges cannot submit or change scores.</div>
+      <div class="eh-mono" style="font-size:12px; color:#fcd34d;">Scoring is <strong>LOCKED</strong>. Judge submissions are disabled.</div>
     </div>
   ` : '';
 
-  const addTeamCTA = `<button class="btn btn-primary btn-lg" data-action="add-team">${icon('plus')}<span>Add Your First Team</span></button>`;
+  const addTeamCTA = `<button class="btn btn-primary btn-lg" data-action="add-team">${icon('plus')}<span>Add Team</span></button>`;
+  const addJudgeCTA = `<button class="btn btn-primary btn-lg" data-action="add-judge">${icon('plus')}<span>Add Judge</span></button>`;
 
   const teamsTable = teams.length === 0
-    ? `<div style="padding:20px;">${emptyHTML('No teams yet', 'Click below to register your first team. New teams are saved in Supabase and appear here as soon as they are added.', 'users', addTeamCTA)}</div>`
+    ? `<div style="padding:20px;">${emptyHTML('No teams yet', 'Add a team to start collecting scores.', 'users', addTeamCTA)}</div>`
     : `<div class="table-wrap"><table class="eh-table">
       <thead><tr><th>Team</th><th>Project</th><th>Track</th><th>Table</th><th>Members</th><th>Scored</th><th></th></tr></thead>
       <tbody>${teams.map(t => {
@@ -1332,7 +1373,7 @@ function renderAdminPage() {
 
   const judgeCardsHTML = judges.length ? judges.map(j => {
     const scoredBy = scores.filter(s => s.judgeSlug === j.slug).length;
-    const url = `${window.location.origin}${window.location.pathname}#/judge/${j.slug}`;
+    const url = judgePortalUrl(j.slug);
     const tagClass = (scoredBy === teams.length && teams.length > 0) ? 'tag-lime' : 'tag-mute';
     return `
       <div class="judge-card">
@@ -1343,15 +1384,16 @@ function renderAdminPage() {
           </div>
           <span class="tag ${tagClass}">${scoredBy}/${teams.length}</span>
         </div>
-        <div class="judge-card-url">#/judge/${j.slug}</div>
-        <div class="judge-card-meta">Login ID: ${escapeHtml(j.slug)}</div>
+        <div class="judge-card-url">${escapeHtml(url)}</div>
+        <div class="judge-card-meta">Slug: ${escapeHtml(j.slug)} · Login ID: ${escapeHtml(j.slug)}</div>
         <div class="judge-card-actions">
           <button class="btn btn-ghost" data-action="judge-open" data-slug="${j.slug}">${icon('external')}<span>Open</span></button>
           <button class="btn btn-ghost" data-action="judge-copy" data-url="${escapeHtml(url)}">${icon('copy')}<span>Copy Link</span></button>
+          <button class="btn btn-ghost" data-action="judge-delete" data-slug="${j.slug}" style="color:#fda4af;">${icon('trash')}<span>Delete</span></button>
         </div>
       </div>
     `;
-  }).join('') : emptyHTML('No judges found', 'Add judge rows in Supabase to create judge endpoints.', 'users');
+  }).join('') : emptyHTML('No judges found', 'Add a judge to create their page and login.', 'users', addJudgeCTA);
 
   return `
     <div class="shell">
@@ -1359,14 +1401,15 @@ function renderAdminPage() {
       <main class="container" style="padding:24px 20px;">
         <div class="admin-header">
           <div>
-            <div class="modal-eyebrow">// Admin console</div>
-            <h1 class="eh-display" style="font-size:48px; margin:0;">Mission Control</h1>
+            <div class="modal-eyebrow">// Admin</div>
+            <h1 class="eh-display" style="font-size:48px; margin:0;">Event Admin</h1>
             <div class="eh-mono" style="font-size:12px; color:var(--eh-text-dim); margin-top:4px;">${teams.length} teams · ${scores.length} scores submitted</div>
           </div>
           <div class="admin-actions">
             <button class="btn ${settings.locked ? 'btn-warning' : ''}" data-action="toggle-lock">${icon(settings.locked ? 'unlock' : 'lock')}<span>${settings.locked ? 'Unlock Scoring' : 'Lock Scoring'}</span></button>
             <button class="btn" data-action="export-csv">${icon('download')}<span>Export CSV</span></button>
             <button class="btn btn-danger" data-action="clear-data">${icon('trash')}<span>Clear Data</span></button>
+            <button class="btn btn-primary" data-action="add-judge">${icon('plus')}<span>Add Judge</span></button>
             <button class="btn btn-primary" data-action="add-team">${icon('plus')}<span>Add Team</span></button>
           </div>
         </div>
@@ -1385,7 +1428,13 @@ function renderAdminPage() {
         </div>
 
         <div class="panel mb-6">
-          <div class="panel-header">// Judge endpoints — share each URL with that judge's credentials</div>
+          <div class="panel-header">
+            <span>// Judges · URLs and access</span>
+            <span style="display:inline-flex; gap:8px; align-items:center;">
+              <span class="tag tag-cyan">${judges.length}</span>
+              <button class="btn btn-ghost" data-action="add-judge" style="padding:4px 10px; min-height:28px;">${icon('plus')}<span>Add</span></button>
+            </span>
+          </div>
           <div class="judge-grid">${judgeCardsHTML}</div>
         </div>
       </main>
@@ -1395,6 +1444,7 @@ function renderAdminPage() {
 
 function bindAdminPage() {
   document.querySelectorAll('[data-action="add-team"]').forEach(b => b.addEventListener('click', () => openTeamModal(null)));
+  document.querySelectorAll('[data-action="add-judge"]').forEach(b => b.addEventListener('click', () => openJudgeModal()));
   document.querySelectorAll('[data-action="edit-team"]').forEach(b => b.addEventListener('click', () => {
     const id = b.getAttribute('data-team');
     const team = state.data.teams.find(t => t.id === id);
@@ -1421,10 +1471,14 @@ function bindAdminPage() {
     });
   }));
   document.querySelectorAll('[data-action="judge-open"]').forEach(b => b.addEventListener('click', () => {
-    window.open(`${window.location.origin}${window.location.pathname}#/judge/${b.getAttribute('data-slug')}`, '_blank');
+    window.open(judgePortalUrl(b.getAttribute('data-slug')), '_blank');
   }));
   document.querySelectorAll('[data-action="judge-copy"]').forEach(b => b.addEventListener('click', () => {
     navigator.clipboard.writeText(b.getAttribute('data-url')).then(() => showToast('Link copied', 'success')).catch(() => showToast('Copy failed', 'error'));
+  }));
+  document.querySelectorAll('[data-action="judge-delete"]').forEach(b => b.addEventListener('click', () => {
+    const judge = state.data.judges.find(j => j.slug === b.getAttribute('data-slug'));
+    if (judge) openJudgeDeleteModal(judge);
   }));
 }
 
@@ -1517,23 +1571,23 @@ function openTeamModal(team) {
         <div class="modal-header">
           <div>
             <div class="modal-eyebrow">// ${editing ? 'Edit team' : 'New team'}</div>
-            <div class="modal-title" id="team-modal-title">${editing ? escapeHtml(team.name || 'Untitled') : 'Register Team'}</div>
+            <div class="modal-title" id="team-modal-title">${editing ? escapeHtml(team.name || 'Untitled') : 'Add Team'}</div>
           </div>
           <button class="btn btn-ghost" data-action="close-modal">${icon('x')}<span>Close</span></button>
         </div>
         <div class="modal-body">
           <div class="form-grid">
             <div class="field"><label class="field-label">Team name<span class="req">*</span></label><input class="input" data-field="name" placeholder="Team name" value="${escapeHtml(form.name)}" /></div>
-            <div class="field"><label class="field-label">Track</label><input class="input" data-field="track" placeholder="AI Infrastructure" value="${escapeHtml(form.track)}" /></div>
-            <div class="field"><label class="field-label">Project title<span class="req">*</span></label><input class="input" data-field="projectTitle" placeholder="One-line project description" value="${escapeHtml(form.projectTitle)}" /></div>
+            <div class="field"><label class="field-label">Track</label><input class="input" data-field="track" placeholder="Track name" value="${escapeHtml(form.track)}" /></div>
+            <div class="field"><label class="field-label">Project title<span class="req">*</span></label><input class="input" data-field="projectTitle" placeholder="Project title" value="${escapeHtml(form.projectTitle)}" /></div>
             <div class="field"><label class="field-label">Table number</label><input class="input" data-field="tableNumber" placeholder="12" value="${escapeHtml(form.tableNumber)}" /></div>
-            <div class="field span-2"><label class="field-label">Team members</label><input class="input" data-field="members" placeholder="Alex K., Priya S., Devon M." value="${escapeHtml(form.members)}" /><span class="field-hint">Comma-separated names</span></div>
-            <div class="field span-2"><label class="field-label">Admin notes</label><textarea class="textarea" rows="3" data-field="notes" placeholder="Anything judges should know">${escapeHtml(form.notes)}</textarea><span class="field-hint">Visible to judges as context</span></div>
+            <div class="field span-2"><label class="field-label">Team members</label><input class="input" data-field="members" placeholder="Comma-separated names" value="${escapeHtml(form.members)}" /><span class="field-hint">Comma-separated names</span></div>
+            <div class="field span-2"><label class="field-label">Judge notes</label><textarea class="textarea" rows="3" data-field="notes" placeholder="Notes shown to judges">${escapeHtml(form.notes)}</textarea><span class="field-hint">Visible on judge scoring pages</span></div>
           </div>
         </div>
         <div class="modal-footer">
           <button class="btn btn-ghost" data-action="close-modal">Cancel</button>
-          <button class="btn btn-primary" id="team-save-btn">${icon('save')}<span>${editing ? 'Save changes' : 'Create team'}</span></button>
+          <button class="btn btn-primary" id="team-save-btn">${icon('save')}<span>${editing ? 'Save changes' : 'Add Team'}</span></button>
         </div>
       </div>
     </div>
@@ -1563,6 +1617,287 @@ function openTeamModal(team) {
     if (t && editing) t.textContent = e.target.value || 'Untitled';
   });
   document.querySelector('[data-field="name"]')?.focus();
+}
+
+function openJudgeModal() {
+  const root = document.getElementById('modal-root');
+  const needsAdminPassword = !adminSessionPassword;
+  root.innerHTML = `
+    <div class="modal-backdrop">
+      <div class="modal">
+        <div class="modal-header">
+          <div>
+            <div class="modal-eyebrow">// New judge</div>
+            <div class="modal-title" id="judge-modal-title">Add Judge</div>
+          </div>
+          <button class="btn btn-ghost" data-action="close-modal">${icon('x')}<span>Close</span></button>
+        </div>
+        <div class="modal-body">
+          <div class="form-grid">
+            <div class="field">
+              <label class="field-label">Judge name<span class="req">*</span></label>
+              <input class="input" data-judge-field="name" placeholder="Judge name" />
+            </div>
+            <div class="field">
+              <label class="field-label">Slug</label>
+              <input class="input" data-judge-field="slug" placeholder="judge-slug" autocapitalize="none" spellcheck="false" />
+              <span class="field-hint">Generated from the judge name unless edited</span>
+            </div>
+            <div class="field">
+              <label class="field-label">Organization<span class="req">*</span></label>
+              <input class="input" data-judge-field="org" placeholder="Organization" />
+            </div>
+            <div class="field">
+              <label class="field-label">Expertise</label>
+              <input class="input" data-judge-field="expertise" placeholder="Area of expertise" />
+            </div>
+            ${needsAdminPassword ? `
+              <div class="field span-2">
+                <label class="field-label">Admin password<span class="req">*</span></label>
+                <input class="input" data-judge-field="adminPassword" type="password" autocomplete="current-password" placeholder="Confirm admin password" />
+                <span class="field-hint">Required once after a page reload</span>
+              </div>
+            ` : `
+              <div class="auth-note span-2">Using your current admin session.</div>
+            `}
+            <div class="field span-2">
+              <label class="field-label">Portal URL</label>
+              <div class="judge-card-url" id="judge-url-preview">${escapeHtml(judgePortalUrl('new-judge'))}</div>
+            </div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-ghost" data-action="close-modal">Cancel</button>
+          <button class="btn btn-primary" id="judge-save-btn">${icon('save')}<span>Add Judge</span></button>
+        </div>
+      </div>
+    </div>
+  `;
+
+  const nameEl = root.querySelector('[data-judge-field="name"]');
+  const slugEl = root.querySelector('[data-judge-field="slug"]');
+  const titleEl = root.querySelector('#judge-modal-title');
+  const previewEl = root.querySelector('#judge-url-preview');
+  const saveBtn = root.querySelector('#judge-save-btn');
+  let slugTouched = false;
+
+  function currentPreviewSlug() {
+    return slugify(slugEl.value) || nextJudgeSlug(nameEl.value) || 'new-judge';
+  }
+
+  function updatePreview() {
+    const slug = currentPreviewSlug();
+    if (previewEl) previewEl.textContent = judgePortalUrl(slug);
+    if (titleEl) titleEl.textContent = nameEl.value.trim() || 'Add Judge';
+  }
+
+  root.querySelector('.modal-backdrop').addEventListener('click', backdropClick);
+  root.querySelectorAll('[data-action="close-modal"]').forEach(b => b.addEventListener('click', clearModal));
+  nameEl.addEventListener('input', () => {
+    if (!slugTouched) slugEl.value = nextJudgeSlug(nameEl.value);
+    updatePreview();
+  });
+  slugEl.addEventListener('input', () => {
+    slugTouched = true;
+    const clean = slugify(slugEl.value);
+    if (slugEl.value !== clean) slugEl.value = clean;
+    updatePreview();
+  });
+
+  saveBtn.addEventListener('click', async () => {
+    if (!requireAdminAccess()) { clearModal(); return; }
+    const fields = {};
+    root.querySelectorAll('[data-judge-field]').forEach(el => { fields[el.getAttribute('data-judge-field')] = el.value.trim(); });
+    const adminPassword = adminSessionPassword || fields.adminPassword || '';
+    const requestedSlug = slugify(fields.slug || fields.name);
+    if (!fields.name || !fields.org) { showToast('Judge name and organization are required', 'error'); return; }
+    if (!requestedSlug) { showToast('Judge slug needs at least one letter or number', 'error'); return; }
+    if (!adminPassword) { showToast('Admin password is required to create credentials', 'error'); return; }
+
+    saveBtn.disabled = true;
+      saveBtn.innerHTML = `${icon('save')}<span>Adding...</span>`;
+    try {
+      const { data, error } = await sb.rpc('create_judge_with_credentials', {
+        p_admin_username: state.auth.username,
+        p_admin_password: adminPassword,
+        p_name: fields.name,
+        p_org: fields.org,
+        p_expertise: fields.expertise || null,
+        p_slug: requestedSlug,
+      });
+      if (error) throw error;
+      const row = Array.isArray(data) ? data[0] : data;
+      if (!row?.slug || !row?.username || !row?.password) {
+        throw new Error('Supabase did not return judge credentials');
+      }
+
+      adminSessionPassword = adminPassword;
+      await fetchData();
+      render();
+      openJudgeCredentialsModal({
+        name: fields.name,
+        org: fields.org,
+        expertise: fields.expertise || '',
+        slug: row.slug,
+        username: row.username,
+        password: row.password,
+        url: judgePortalUrl(row.slug),
+      });
+      showToast('Judge added', 'success');
+    } catch (e) {
+      console.error(e);
+      saveBtn.disabled = false;
+      saveBtn.innerHTML = `${icon('save')}<span>Add Judge</span>`;
+      showToast('Judge create failed: ' + (e.message || 'unknown error'), 'error');
+    }
+  });
+
+  updatePreview();
+  nameEl.focus();
+}
+
+function openJudgeCredentialsModal(details) {
+  const root = document.getElementById('modal-root');
+  const accessPacket = [
+    `Judge: ${details.name}`,
+    `Portal URL: ${details.url}`,
+    `Slug: ${details.slug}`,
+    `Login ID: ${details.username}`,
+    `Password: ${details.password}`,
+  ].join('\n');
+
+  root.innerHTML = `
+    <div class="modal-backdrop">
+      <div class="modal modal-sm">
+        <div class="modal-header">
+          <div>
+            <div class="modal-eyebrow">// Judge added</div>
+            <div class="modal-title">${escapeHtml(details.name)}</div>
+          </div>
+          <button class="btn btn-ghost" data-action="close-modal">${icon('x')}<span>Close</span></button>
+        </div>
+        <div class="modal-body">
+          <div class="credential-grid">
+            <div class="credential-row">
+              <div class="credential-label">Portal URL</div>
+              <div class="credential-value lime">${escapeHtml(details.url)}</div>
+            </div>
+            <div class="credential-row">
+              <div class="credential-label">Slug</div>
+              <div class="credential-value">${escapeHtml(details.slug)}</div>
+            </div>
+            <div class="credential-row">
+              <div class="credential-label">Login ID</div>
+              <div class="credential-value">${escapeHtml(details.username)}</div>
+            </div>
+            <div class="credential-row">
+              <div class="credential-label">Password</div>
+              <div class="credential-value">${escapeHtml(details.password)}</div>
+            </div>
+          </div>
+          <div class="auth-note" style="margin-top:12px;">Save this password now. It is shown once.</div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-ghost" id="judge-open-created">${icon('external')}<span>Open</span></button>
+          <button class="btn" id="judge-copy-url">${icon('copy')}<span>Copy URL</span></button>
+          <button class="btn btn-primary" id="judge-copy-all">${icon('copy')}<span>Copy Details</span></button>
+        </div>
+      </div>
+    </div>
+  `;
+
+  const copyText = (text, label) => {
+    navigator.clipboard.writeText(text)
+      .then(() => showToast(`${label} copied`, 'success'))
+      .catch(() => showToast('Copy failed', 'error'));
+  };
+
+  root.querySelector('.modal-backdrop').addEventListener('click', backdropClick);
+  root.querySelectorAll('[data-action="close-modal"]').forEach(b => b.addEventListener('click', clearModal));
+  root.querySelector('#judge-open-created')?.addEventListener('click', () => window.open(details.url, '_blank'));
+  root.querySelector('#judge-copy-url')?.addEventListener('click', () => copyText(details.url, 'URL'));
+  root.querySelector('#judge-copy-all')?.addEventListener('click', () => copyText(accessPacket, 'Access details'));
+}
+
+function openJudgeDeleteModal(judge) {
+  const root = document.getElementById('modal-root');
+  const scoredBy = state.data.scores.filter(s => s.judgeSlug === judge.slug).length;
+  const needsAdminPassword = !adminSessionPassword;
+  root.innerHTML = `
+    <div class="modal-backdrop">
+      <div class="modal modal-sm">
+        <div style="padding:20px; border-bottom:1px solid var(--eh-border); display:flex; gap:12px; align-items:flex-start;">
+          <div style="color:var(--eh-magenta); flex-shrink:0;">${icon('alert', 'width="20" height="20"')}</div>
+          <div>
+            <div class="modal-title" style="margin-bottom:4px;">Delete ${escapeHtml(judge.name)}?</div>
+            <div style="color:var(--eh-text-dim); font-size:13px;">
+              This removes the judge page, login, and ${scoredBy} submitted ${scoredBy === 1 ? 'score' : 'scores'}. This cannot be undone.
+            </div>
+          </div>
+        </div>
+        <div class="modal-body">
+          <div class="credential-row">
+            <div class="credential-label">Judge slug</div>
+            <div class="credential-value">${escapeHtml(judge.slug)}</div>
+          </div>
+          ${needsAdminPassword ? `
+            <div class="field" style="margin-top:12px;">
+              <label class="field-label">Admin password<span class="req">*</span></label>
+              <input class="input" id="judge-delete-admin-password" type="password" autocomplete="current-password" placeholder="Confirm admin password" />
+            </div>
+          ` : `
+            <div class="auth-note" style="margin-top:12px;">Using your current admin session.</div>
+          `}
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-ghost" data-action="close-modal">Cancel</button>
+          <button class="btn btn-danger" id="judge-delete-confirm">${icon('trash')}<span>Delete judge</span></button>
+        </div>
+      </div>
+    </div>
+  `;
+
+  const passwordEl = root.querySelector('#judge-delete-admin-password');
+  const confirmBtn = root.querySelector('#judge-delete-confirm');
+  root.querySelector('.modal-backdrop').addEventListener('click', backdropClick);
+  root.querySelectorAll('[data-action="close-modal"]').forEach(b => b.addEventListener('click', clearModal));
+  confirmBtn.addEventListener('click', () => deleteJudge(judge, passwordEl?.value.trim() || '', confirmBtn));
+  passwordEl?.focus();
+}
+
+async function deleteJudge(judge, passwordOverride = '', button = null) {
+  if (!requireAdminAccess()) { clearModal(); return; }
+  const adminPassword = adminSessionPassword || passwordOverride;
+  if (!adminPassword) {
+    showToast('Admin password is required to delete a judge', 'error');
+    return;
+  }
+
+  if (button) {
+    button.disabled = true;
+    button.innerHTML = `${icon('trash')}<span>Deleting...</span>`;
+  }
+
+  try {
+    const { error } = await sb.rpc('delete_judge_with_credentials', {
+      p_admin_username: state.auth.username,
+      p_admin_password: adminPassword,
+      p_judge_slug: judge.slug,
+    });
+    if (error) throw error;
+
+    adminSessionPassword = adminPassword;
+    showToast(`Deleted ${judge.name}`, 'success');
+    clearModal();
+    await refresh();
+  } catch (e) {
+    console.error(e);
+    if (button) {
+      button.disabled = false;
+      button.innerHTML = `${icon('trash')}<span>Delete judge</span>`;
+    }
+    showToast('Judge delete failed: ' + (e.message || 'unknown error'), 'error');
+  }
 }
 
 function openConfirmModal({ title, message, confirmLabel, onConfirm }) {
@@ -1629,7 +1964,7 @@ function renderScoreboardPage() {
   `;
 
   const tableHTML = ranked.length === 0
-    ? emptyHTML('No teams yet', 'Add teams in the admin console to see the scoreboard.', 'trophy')
+    ? emptyHTML('No teams yet', 'Add teams from Admin to populate the scoreboard.', 'trophy')
     : `<div class="panel">
       <div class="table-wrap">
         <table class="eh-table">
@@ -1685,7 +2020,7 @@ function renderScoreboardPage() {
           <div>
             <div class="hero-eyebrow">
               <span class="dot eh-pulse-dot"></span>
-              <span class="text">// Live · Auto-syncing via Supabase Realtime</span>
+              <span class="text">// Scoreboard</span>
             </div>
             <h1 class="eh-display" style="font-size:48px; margin:0;">Scoreboard</h1>
             <div class="eh-mono" style="font-size:12px; color:var(--eh-text-dim); margin-top:4px;">
@@ -1702,9 +2037,9 @@ function renderScoreboardPage() {
         ${tableHTML}
         <div class="legend">
           ${icon('activity', 'width="11" height="11"')}
-          Ranking by avg final score · ties broken by avg Functionality, then Innovation, then Business Impact ·
+          Ranking uses final average. Ties use Functionality, then Innovation, then Business Impact.
           ${icon('alert', 'width="11" height="11" style="color:#f87171"')}
-          <span class="outlier-mark">outlier</span> = single judge ≥20 pts from team avg.
+          <span class="outlier-mark">outlier</span> = judge score 20+ points from team average.
         </div>
       </main>
     </div>
